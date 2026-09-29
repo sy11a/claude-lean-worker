@@ -16,9 +16,10 @@ shown when the skill loads. Below, `<skill-dir>` means that absolute path.
 
 ## Prerequisites (check once per session)
 
-- `ANTHROPIC_API_KEY` is set in the environment, because `--bare` never reads OAuth or the
-  keychain. If it is missing, tell the user. Pass `--no-bare` only if the user agrees: it runs the
-  same lean profile without `--bare` and starts somewhat larger.
+- `claude` is logged in. The launcher picks the mode itself: **bare** (`claude --bare`) when
+  `ANTHROPIC_API_KEY` is set, and **lean** when the user is on a subscription login (Pro, Max,
+  Team or Enterprise). Lean runs the same minimal profile with the project's CLAUDE.md, AGENTS.md
+  and rules excluded. Both are fine. Do not ask the user for an API key when they are on a subscription.
 - `claude` is on PATH, and `claude --help` lists `--bare`.
 - A .NET SDK 8 or newer (`dotnet --list-sdks`). The first run builds the launcher, which takes a
   few seconds; later runs reuse the build.
@@ -91,7 +92,7 @@ The script prints one block:
 LEAN-WORKER RESULT
 run:      .lean-worker/runs/<stamp>-<task-name>
 status:   success  (subtype=success, reason=completed, exit=0)
-model:    claude-sonnet-5, effort medium, profile code, bare=True
+model:    claude-sonnet-5, effort medium, profile code, mode bare
 work:     12 turns, 12 API calls, 3m41s
 cost:     $0.4123 (list price reported by Claude Code)
 tokens:   input 310 | cache write 21,004 | cache read 402,118 | output 9,870 (thinking 3,200)
@@ -112,7 +113,11 @@ context:  first call 4,812 | peak 38,420
   start-here paths, scope) or split the task, and run again. Each run gets its own directory.
 - If the cause is general (a missing command, an unknown convention), fix `project.md` or the
   profile instead of the task.
-- `status: error` with `reason: api_error` and "Not logged in" means the API key is missing.
+- `status: error` with `reason: api_error` and "Not logged in" means the worker could not
+  authenticate. In bare mode the key is missing or invalid. In lean mode `claude` is not logged
+  in: ask the user to run `claude` and `/login`.
+- On a subscription, the `cost:` line is the list-price equivalent, not a bill; the tokens count
+  against the plan's usage limits. Report it as such.
 - If the summary reports permission denials, add the needed commands to the profile's `allowedTools`.
 
 ## Review run (optional)

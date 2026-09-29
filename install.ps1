@@ -61,8 +61,8 @@ if (-not $okSdk) { Die ".NET SDK 8 or newer not found (dotnet --list-sdks: $($sd
 Ok ("dotnet SDK: " + (($okSdk | ForEach-Object { ($_ -split ' ')[0] }) -join ', '))
 
 if ([string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY)) {
-    Warn "ANTHROPIC_API_KEY is not set in this shell. --bare workers need it (or an apiKeyHelper settings file passed with --claude-settings)."
-} else { Ok "ANTHROPIC_API_KEY is set" }
+    Ok "no ANTHROPIC_API_KEY: workers will run in lean mode on your Claude Code login (Pro/Max/Team/Enterprise subscription). Make sure 'claude' is logged in."
+} else { Ok "ANTHROPIC_API_KEY is set: workers will run in bare mode (claude --bare)" }
 
 # ---------- 2. copy the skill ----------
 Step 'Installing the skill'
@@ -154,11 +154,9 @@ if ($SmokeTest) {
     New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
     $task = Join-Path $taskDir 'task.md'
     [IO.File]::WriteAllText($task, "# Task: smoke test`n`nDo not read or change any file. Reply with exactly one line: lean-worker smoke test OK`n", $utf8)
-    $bareArgs = @()
-    if ([string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY)) { Warn "no ANTHROPIC_API_KEY: running the smoke test with --no-bare"; $bareArgs = @('--no-bare') }
     Push-Location $work
     try {
-        & $dotnet.Source run --project $launcher -c Release -- --task $task --model claude-haiku-4-5 --effort low --tools Read --max-budget-usd 0.1 --no-project-notes @bareArgs
+        & $dotnet.Source run --project $launcher -c Release -- --task $task --model claude-haiku-4-5 --effort low --tools Read --max-budget-usd 0.1 --no-project-notes
         $smokeExit = $LASTEXITCODE
     } finally { Pop-Location }
     if ($smokeExit -eq 0) { Ok "smoke test passed" } else { Warn "smoke test did not succeed (exit $smokeExit); read the block above" }

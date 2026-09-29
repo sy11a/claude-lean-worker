@@ -36,7 +36,7 @@ Run each command and report the result to the user in one short list:
 |---|---|---|
 | Claude Code supports `--bare` | `claude --help` (look for `--bare`) | yes: stop and tell the user to update Claude Code |
 | .NET SDK 8 or newer | `dotnet --list-sdks` | yes: stop and tell the user to install it |
-| API key in the environment | check whether `ANTHROPIC_API_KEY` is set. **Never print its value** | no: note it for step 7 |
+| How Claude Code is authenticated | check whether `ANTHROPIC_API_KEY` is set (**never print its value**); if not, the user is on a subscription login (Pro/Max/Team/Enterprise) | no: either works. Key → workers run in **bare** mode; subscription → **lean** mode. Do not ask for an API key on a subscription |
 | PowerShell | `powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"` (or `pwsh`) | yes |
 
 ## Step 3: Ask the user two questions
@@ -128,9 +128,10 @@ Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 `<skill-dir>` is where the skill was installed: `%USERPROFILE%\.claude\skills\lean-worker`, or
 `<project root>\.claude\skills\lean-worker`.
 
-- **If `ANTHROPIC_API_KEY` is not set:** tell the user. `--bare` cannot run without it. Offer two
-  things: they set the key and restart the terminal, or you run the smoke test once with
-  `--no-bare` so the installation itself is proven.
+- The launcher picks the mode itself: bare with an API key, lean on a subscription login.
+  The result block shows which one ran.
+- **If it fails with "Not logged in":** in lean mode, ask the user to run `claude` and `/login`.
+  In bare mode, the key is missing or invalid.
 - **Success:** the block starts with `LEAN-WORKER RESULT`, shows `status: success`, and the worker
   report says `lean-worker smoke test OK`. Tell the user the cost and first-call context from
   the block.
@@ -141,7 +142,8 @@ Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 2. Tell the user, in a few lines:
    - where the skill is installed, and whether the permission rule was added;
    - what went into `project.md` and `profiles.json`, and what still needs their review;
-   - the smoke test result, with its cost;
+   - the smoke test result: its mode, and its cost. On a subscription, say that the cost is the
+  list-price equivalent and the tokens count against the plan's usage;
    - **that they must restart Claude Code (or start a new session) before `/lean-worker` is available;**
    - how to use it: `/lean-worker <what to do>; done when <command> passes`.
 3. Do not commit anything. Whether `.lean-worker/project.md`, `profiles.json` and
@@ -153,8 +155,9 @@ Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `LEAN-WORKER LAUNCH FAILED: ANTHROPIC_API_KEY is not set` | `--bare` reads only the key | Set the key, or use `--claude-settings <file>` with an `apiKeyHelper`, or `--no-bare` |
-| `status: error`, `reason: api_error`, "Not logged in" | Key missing or invalid in the worker's environment | Check that the key is set in the environment Claude Code was started from |
+| `LEAN-WORKER LAUNCH FAILED: --mode bare needs ANTHROPIC_API_KEY` | `--mode bare` was forced without a key | Use `--mode auto` (the default) or `--mode lean` on a subscription |
+| `status: error`, `reason: api_error`, "Not logged in" | Lean mode: `claude` is not logged in. Bare mode: the key is missing or invalid | Lean: run `claude`, then `/login`. Bare: check the key in the environment Claude Code runs in |
+| The worker sees project rules it should not see (lean) | A rules file outside the excluded patterns | Check the worker's `settings.json` in the run directory; pass `--claude-settings` with extra `claudeMdExcludes` |
 | `'claude' is not on PATH` from the launcher | Claude Code is installed for another shell | Add its folder to PATH, or reinstall with the native installer |
 | Permission prompts on every launch | Rule not added, or a different command shape | Add `Bash(dotnet run --project:*)` to `.claude/settings.json` `permissions.allow` |
 | `WARNING: n permission denial(s)` in a result | The worker needed a command not pre-approved | Add that command prefix to the profile's `allowedTools` |

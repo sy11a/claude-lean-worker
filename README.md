@@ -23,7 +23,7 @@ Every run is recorded, so you can see what each delegated task actually cost:
 LEAN-WORKER RESULT
 run:      .lean-worker/runs/20260929-133150-add-greeting
 status:   success  (subtype=success, reason=completed, exit=0)
-model:    claude-haiku-4-5, effort low, profile code, bare=False
+model:    claude-haiku-4-5, effort low, profile code, mode lean
 work:     3 turns, 3 API calls, 0m13s
 cost:     $0.0105 (list price reported by Claude Code)
 tokens:   input 25 | cache write 971 | cache read 43,573 | output 830 (thinking 501)
@@ -36,9 +36,12 @@ This is real output from a test run with `--no-bare`. A `--bare` run starts smal
 
 ## Requirements
 
-- Claude Code with `--bare` in `claude --help`, authenticated by **API key**. `--bare` reads
-  only `ANTHROPIC_API_KEY` (or an `apiKeyHelper` passed via `--settings`); it never reads
-  OAuth or the keychain.
+- Claude Code, logged in with either:
+  - an **API key** (`ANTHROPIC_API_KEY` or an `apiKeyHelper`). Workers then run in **bare** mode
+    (`claude --bare`), or
+  - a **subscription login** (Pro, Max, Team or **Enterprise**; `claude` + `/login`). Workers then run in
+    **lean** mode. `--bare` cannot use a subscription login, so the launcher builds the same
+    minimal profile from flags instead. See [Authentication and modes](#authentication-and-modes).
 - .NET SDK 8 or newer. The launcher targets `net8.0` with `RollForward=LatestMajor`, so it
   also runs on newer runtimes. It has no NuGet dependencies.
 
@@ -93,12 +96,28 @@ The orchestrator reads the repository and asks you about anything it cannot see.
 
 Then **read and edit both files by hand**. They are yours, and the skill never overwrites your edits.
 
-### 3. API key
+### 3. Authentication and modes
 
-`--bare` reads only `ANTHROPIC_API_KEY`, or an `apiKeyHelper` in a settings file passed with
-`--claude-settings <file>`. It never uses OAuth or the keychain. Make sure the key is in the
-environment Claude Code runs in. For example, set it once for your user with
-`setx ANTHROPIC_API_KEY <key>` and open a new terminal.
+The launcher picks the mode itself (`--mode auto`, the default). The mode is shown in every result block.
+
+| Your Claude Code login | Mode | What the worker runs |
+|---|---|---|
+| `ANTHROPIC_API_KEY` set, or `--claude-settings <file>` with an `apiKeyHelper` | **bare** | `claude -p --bare`: loads no CLAUDE.md, hooks, plugins, skills, auto-memory or MCP |
+| Subscription login: Pro, Max, Team, **Enterprise** | **lean** | `claude -p` with CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude/rules` excluded (via `claudeMdExcludes`), skills disabled, and no MCP |
+
+Nothing needs configuring for an Enterprise subscription. Stay logged in to `claude` as usual;
+the worker uses the same login.
+
+- **Don't set an API key "just for the workers" on an Enterprise seat** unless your organisation
+  gives you one. `--bare` cannot use the subscription login; the lean mode exists for exactly that.
+- **Cost on a subscription.** The `cost:` line is the list-price equivalent that Claude Code reports.
+  On Enterprise you are not billed that amount: the tokens count against your plan's usage limits.
+  It is still the right number for comparing tasks and profiles.
+- **Size.** A trivial task, measured with a subscription login, had a first call of about 9k
+  tokens in lean mode. Without the exclusions (`--keep-claude-md`) it was about 13k. A default
+  in-session subagent is typically 40-60k. Bare mode is expected to be a little smaller than lean.
+- **User and managed settings still apply in lean mode.** That includes enterprise policy,
+  proxies and your user hooks. Bare mode skips hooks.
 
 ## How it fits your Claude Code flow
 
@@ -159,8 +178,10 @@ dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbo
 | `--timeout-minutes <n>` | `60` | Kill the worker after n minutes |
 | `--no-project-notes` | off | Do not send `project.md` |
 | `--replace-system-prompt` | off | Replace Claude Code's system prompt instead of appending to it |
-| `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper` |
-| `--no-bare` | off | Same lean profile without `--bare`, e.g. when there is no API key |
+| `--mode auto\|bare\|lean` | `auto` | `bare` if an API key or `--claude-settings` is present, otherwise `lean` (subscription) |
+| `--keep-claude-md` | off | Lean mode: do not exclude CLAUDE.md / AGENTS.md / `.claude/rules` |
+| `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper`. In lean mode it is merged with the exclusions |
+| `--no-bare` | off | Alias for `--mode lean` |
 
 A setting comes from the command-line option if one is given, otherwise from the profile,
 otherwise from the built-in default. The worker always runs with `--strict-mcp-config`, so it
@@ -198,6 +219,11 @@ Checked on 2026-09-29 with Claude Code 2.1.284 and .NET SDK 10.
 - the refusal when an unknown profile is named;
 - `install.ps1` under PowerShell 7.6: a full install into a sandbox home and project, the smoke
   test, and a re-run that duplicates nothing.
+
+- lean mode with a subscription login, checked with codeword probes: the worker does not see the
+  project's CLAUDE.md, AGENTS.md or `.claude/rules` (9.1k first call), and does see them with
+  `--keep-claude-md` (13.4k). It also covers the AGENTS.md fallback, which loads when CLAUDE.md is
+  excluded alone.
 
 **Not yet tested:**
 - a `--bare` run with an API key;

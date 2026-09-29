@@ -81,10 +81,19 @@ internal static class Program
         if (mcpConfig is not null && !File.Exists(mcpConfig)) throw new LaunchException($"MCP config not found: {mcpConfig}");
         var claude = FindOnPath("claude") ?? throw new LaunchException("'claude' is not on PATH.");
         if (o.ClaudeSettings is not null && !File.Exists(o.ClaudeSettings)) throw new LaunchException($"settings file not found: {o.ClaudeSettings}");
-        if (!o.NoBare && o.ClaudeSettings is null && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
+        // bare: `claude --bare`, API key (or apiKeyHelper) only. lean: subscription login (Pro/Max/Team/Enterprise),
+        // where --bare cannot authenticate; the same minimal profile is built from flags instead.
+        var hasKey = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) || o.ClaudeSettings is not null;
+        var mode = o.Mode switch
         {
-            throw new LaunchException("ANTHROPIC_API_KEY is not set. --bare reads only the API key (never OAuth/keychain). " +
-                                      "Set the key, pass --claude-settings with an apiKeyHelper, or pass --no-bare to run without --bare.");
+            "auto" => hasKey ? "bare" : "lean",
+            "bare" or "lean" => o.Mode,
+            _ => throw new LaunchException($"invalid mode '{o.Mode}' (auto | bare | lean)"),
+        };
+        if (mode == "bare" && !hasKey)
+        {
+            throw new LaunchException("--mode bare needs ANTHROPIC_API_KEY (or --claude-settings with an apiKeyHelper): --bare never reads " +
+                                      "OAuth or the keychain. With a subscription login (e.g. Enterprise), use --mode lean or leave --mode auto.");
         }
 
         var taskPath = Path.GetFullPath(o.TaskFile);
@@ -109,12 +118,30 @@ internal static class Program
 
         // ---------- build arguments ----------
         var a = new List<string> { "-p" };
-        if (!o.NoBare) a.Add("--bare");
+        if (mode == "bare") a.Add("--bare");
         a.AddRange(["--model", model, "--effort", effort]);
         if (runSystem is not null) a.AddRange([o.ReplaceSystemPrompt ? "--system-prompt-file" : "--append-system-prompt-file", runSystem]);
         a.AddRange(["--tools", string.Join(",", tools)]);
         if (allowed.Count > 0) { a.Add("--allowedTools"); a.AddRange(allowed); }
-        if (o.ClaudeSettings is not null) a.AddRange(["--settings", Path.GetFullPath(o.ClaudeSettings)]);
+        if (mode == "lean")
+        {
+            // Without --bare Claude Code would load the project's CLAUDE.md / AGENTS.md / rules and list skills.
+            // Exclude them via settings (merged into the user's --claude-settings, if any) and disable skills.
+            var settings = o.ClaudeSettings is not null
+                ? JsonNode.Parse(File.ReadAllText(o.ClaudeSettings, Utf8))?.AsObject() ?? new JsonObject()
+                : new JsonObject();
+            if (!o.KeepClaudeMd)
+            {
+                settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
+            }
+            var settingsPath = Path.GetFullPath(Path.Combine(runDir, "settings.json"));
+            File.WriteAllText(settingsPath, settings.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), Utf8);
+            a.AddRange(["--settings", settingsPath, "--disable-slash-commands"]);
+        }
+        else if (o.ClaudeSettings is not null)
+        {
+            a.AddRange(["--settings", Path.GetFullPath(o.ClaudeSettings)]);
+        }
         a.Add("--strict-mcp-config");
         if (mcpConfig is not null) a.AddRange(["--mcp-config", Path.GetFullPath(mcpConfig)]);
         a.AddRange(["--permission-mode", permissionMode,
@@ -175,7 +202,7 @@ internal static class Program
             ["profile"] = profileName,
             ["model"] = model,
             ["effort"] = effort,
-            ["bare"] = !o.NoBare,
+            ["mode"] = mode,
             ["status"] = status,
             ["subtype"] = result?["subtype"]?.GetValue<string>(),
             ["terminal_reason"] = result?["terminal_reason"]?.GetValue<string>(),
@@ -201,7 +228,7 @@ internal static class Program
         w.WriteLine("LEAN-WORKER RESULT");
         w.WriteLine($"run:      {runDir}");
         w.WriteLine($"status:   {status}  (subtype={summary["subtype"]}, reason={summary["terminal_reason"]}, exit={exitCode})");
-        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, bare={!o.NoBare}");
+        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, mode {mode}");
         w.WriteLine($"work:     {Num(result?["num_turns"])} turns, {contexts.Count} API calls, {(int)elapsed.TotalMinutes}m{elapsed.Seconds:00}s");
         w.WriteLine($"cost:     ${cost.ToString("0.0000", ic)} (list price reported by Claude Code)");
         w.WriteLine($"tokens:   input {N(tok["input"])} | cache write {N(tok["cache_write"])} | cache read {N(tok["cache_read"])} | output {N(tok["output"])} (thinking {N(tok["thinking"])})");
@@ -330,7 +357,11 @@ internal sealed class Options
           --report-max-chars <n>     truncate the printed report (default 6000)
           --no-project-notes         do not give the worker <runs-root>/project.md
           --replace-system-prompt    replace Claude Code's system prompt instead of appending
-          --no-bare                  same lean profile without --bare (e.g. no API key)
+          --mode <auto|bare|lean>    bare = claude --bare (API key); lean = same minimal profile for a
+                                     subscription login (Enterprise/Team/Max); auto (default) = bare if
+                                     ANTHROPIC_API_KEY or --claude-settings is set, else lean
+          --no-bare                  alias for --mode lean
+          --keep-claude-md           lean mode: do not exclude CLAUDE.md / AGENTS.md / .claude/rules
         """;
 
     public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings;
@@ -338,7 +369,8 @@ internal sealed class Options
     public List<string> AllowedTools = [];
     public decimal? MaxBudgetUsd;
     public int TimeoutMinutes = 60, ReportMaxChars = 6000;
-    public bool NoProjectNotes, ReplaceSystemPrompt, NoBare, Help;
+    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, Help;
+    public string Mode = "auto";
 
     public static Options Parse(string[] args)
     {
@@ -365,7 +397,9 @@ internal sealed class Options
                 case "--report-max-chars": o.ReportMaxChars = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--no-project-notes": o.NoProjectNotes = true; break;
                 case "--replace-system-prompt": o.ReplaceSystemPrompt = true; break;
-                case "--no-bare": o.NoBare = true; break;
+                case "--no-bare": o.Mode = "lean"; break;
+                case "--mode": o.Mode = Next(); break;
+                case "--keep-claude-md": o.KeepClaudeMd = true; break;
                 case "-h" or "--help": o.Help = true; break;
                 default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");
             }
