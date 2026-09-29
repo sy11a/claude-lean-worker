@@ -75,6 +75,10 @@ internal static class Program
         // Managed (organisation) hooks cannot be disabled from here and keep running.
         var keepHooks = o.KeepHooks || (profile?["keepHooks"] is JsonValue kh && kh.TryGetValue(out bool khb) && khb);
         var noHooks = !keepHooks;
+        // Worker calls follow each other within seconds, so the 5-minute cache is enough. A subscription login
+        // would otherwise write the cache with the 1-hour TTL, which costs 2x base input instead of 1.25x.
+        var cacheTtl = o.CacheTtl ?? Str(profile, "cacheTtl") ?? "5m";
+        if (cacheTtl is not ("5m" or "1h" or "default")) throw new LaunchException($"invalid cache TTL '{cacheTtl}' (5m | 1h | default)");
         if (!Efforts.Contains(effort)) throw new LaunchException($"invalid effort '{effort}'");
         if (!PermissionModes.Contains(permissionMode)) throw new LaunchException($"invalid permission mode '{permissionMode}'");
 
@@ -159,7 +163,9 @@ internal static class Program
         // ---------- run ----------
         var streamPath = Path.Combine(runDir, "stream.jsonl");
         var stderrPath = Path.Combine(runDir, "stderr.txt");
-        var (exitCode, timedOut) = RunClaude(claude, a, File.ReadAllText(taskPath, Utf8), streamPath, stderrPath, o.TimeoutMinutes);
+        var env = new Dictionary<string, string>();
+        if (cacheTtl != "default") env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = cacheTtl;
+        var (exitCode, timedOut) = RunClaude(claude, a, File.ReadAllText(taskPath, Utf8), streamPath, stderrPath, o.TimeoutMinutes, env);
         var elapsed = DateTimeOffset.Now - started;
 
         // ---------- parse ----------
@@ -210,6 +216,7 @@ internal static class Program
             ["model"] = model,
             ["effort"] = effort,
             ["mode"] = mode,
+            ["cache_ttl"] = cacheTtl,
             ["hooks"] = mode == "bare" ? "off (bare)" : noHooks ? "off (managed hooks still run)" : "on",
             ["status"] = status,
             ["subtype"] = result?["subtype"]?.GetValue<string>(),
@@ -236,7 +243,7 @@ internal static class Program
         w.WriteLine("LEAN-WORKER RESULT");
         w.WriteLine($"run:      {runDir}");
         w.WriteLine($"status:   {status}  (subtype={summary["subtype"]}, reason={summary["terminal_reason"]}, exit={exitCode})");
-        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, mode {mode}, hooks {summary["hooks"]}");
+        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, mode {mode}, hooks {summary["hooks"]}, cache {cacheTtl}");
         w.WriteLine($"work:     {Num(result?["num_turns"])} turns, {contexts.Count} API calls, {(int)elapsed.TotalMinutes}m{elapsed.Seconds:00}s");
         w.WriteLine($"cost:     ${cost.ToString("0.0000", ic)} (list price reported by Claude Code)");
         w.WriteLine($"tokens:   input {N(tok["input"])} | cache write {N(tok["cache_write"])} | cache read {N(tok["cache_read"])} | output {N(tok["output"])} (thinking {N(tok["thinking"])})");
@@ -266,7 +273,7 @@ internal static class Program
     }
 
     private static (int ExitCode, bool TimedOut) RunClaude(string claude, List<string> args, string stdin,
-        string streamPath, string stderrPath, int timeoutMinutes)
+        string streamPath, string stderrPath, int timeoutMinutes, Dictionary<string, string> env)
     {
         var psi = new ProcessStartInfo
         {
@@ -290,6 +297,7 @@ internal static class Program
             psi.FileName = claude;
         }
         foreach (var arg in args) psi.ArgumentList.Add(arg);
+        foreach (var (k, v) in env) psi.Environment[k] = v;
 
         using var p = Process.Start(psi) ?? throw new LaunchException("could not start claude");
         using var stream = new StreamWriter(streamPath, false, Utf8);
@@ -371,11 +379,12 @@ internal sealed class Options
           --no-bare                  alias for --mode lean
           --keep-claude-md           lean mode: do not exclude CLAUDE.md / AGENTS.md / .claude/rules
           --keep-memory              lean mode: keep auto memory (off by default)
+          --cache-ttl <5m|1h|default> prompt-cache lifetime for the worker (default 5m; profile key "cacheTtl")
           --keep-hooks               lean mode: keep user/project/plugin hooks (off by default; profile key "keepHooks": true).
                                      Managed (organisation) hooks always run.
         """;
 
-    public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings;
+    public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings, CacheTtl;
     public List<string>? Tools;
     public List<string> AllowedTools = [];
     public decimal? MaxBudgetUsd;
@@ -413,6 +422,7 @@ internal sealed class Options
                 case "--keep-claude-md": o.KeepClaudeMd = true; break;
                 case "--keep-memory": o.KeepMemory = true; break;
                 case "--keep-hooks": o.KeepHooks = true; break;
+                case "--cache-ttl": o.CacheTtl = Next(); break;
                 case "--no-hooks": break; // hooks are off by default; accepted for compatibility
                 case "-h" or "--help": o.Help = true; break;
                 default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");

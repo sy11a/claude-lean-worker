@@ -4,36 +4,75 @@
     "read": {
       "model": "claude-haiku-4-5",
       "effort": "low",
-      "tools": ["Read", "Glob", "Grep"],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
       "allowedTools": [],
       "maxBudgetUsd": 0.5
     },
     "edit": {
       "model": "claude-sonnet-5",
       "effort": "low",
-      "tools": ["Read", "Edit", "Glob", "Grep"],
+      "tools": [
+        "Read",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
       "allowedTools": [],
       "maxBudgetUsd": 1
     },
     "code": {
       "model": "claude-sonnet-5",
       "effort": "medium",
-      "tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
-      "allowedTools": ["Bash({build command}:*)", "Bash({test command}:*)", "Bash(git diff:*)", "Bash(git status:*)"],
+      "tools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash({build command}:*)",
+        "Bash({test command}:*)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(ls:*)",
+        "Bash(cat:*)",
+        "Bash(pwd)"
+      ],
       "maxBudgetUsd": 3
     },
     "research": {
       "model": "claude-sonnet-5",
       "effort": "medium",
-      "tools": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
-      "allowedTools": [],
+      "tools": [
+        "Read",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "allowedTools": [
+        "WebFetch",
+        "WebSearch"
+      ],
       "maxBudgetUsd": 1
     },
     "review": {
       "model": "claude-sonnet-5",
       "effort": "medium",
-      "tools": ["Read", "Glob", "Grep", "Bash"],
-      "allowedTools": ["Bash(git diff:*)", "Bash(git log:*)"],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash(git diff:*)",
+        "Bash(git log:*)"
+      ],
       "maxBudgetUsd": 1
     }
   }

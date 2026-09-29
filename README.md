@@ -223,6 +223,7 @@ dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbo
 | `--mode auto\|bare\|lean` | `auto` | `bare` if an API key or `--claude-settings` is present, otherwise `lean` (subscription) |
 | `--keep-claude-md` | off | Lean mode: do not exclude CLAUDE.md / AGENTS.md / `.claude/rules` |
 | `--keep-memory` | off | Lean mode: keep auto memory |
+| `--cache-ttl 5m\|1h\|default` | `5m` | Prompt-cache lifetime for the worker (profile key `cacheTtl`). See below |
 | `--keep-hooks` | off | Lean mode: keep your user/project/plugin hooks (or `"keepHooks": true` in a profile). Managed hooks always run |
 | `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper`. In lean mode it is merged with the exclusions |
 | `--no-bare` | off | Alias for `--mode lean` |
@@ -232,6 +233,21 @@ otherwise from the built-in default. The worker always runs with `--strict-mcp-c
 gets no MCP server unless the profile or `--mcp-config` names one.
 
 Exit codes: `0` success, `1` the worker reported an error, `2` the launcher failed.
+
+## Cost notes from real runs
+
+- **Cache TTL.** A `claude -p` worker on a subscription login writes its cache with the 1-hour TTL by
+  default, which costs 2x base input. An API key defaults to 5 minutes, at 1.25x. A worker's calls
+  follow each other within seconds, so the launcher sets `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` for the
+  worker. On two measured runs the 1-hour writes were 25-45% of the cost; at 5m they cost about 40% less.
+- **Tools are the base now.** With instructions excluded, most of a worker's first call is tool schemas.
+  Bash, Edit, Write and WebFetch are large. Give each profile only the tools its task class uses.
+- **Pre-approve harmless read commands** (`ls`, `cat`, `pwd`) in coding profiles. Each denied call is a
+  wasted API call.
+- **Research workers** grow with every fetched page: a docs task peaked at 99.5k tokens, and the
+  WebFetch summaries cost another 16%. Give exact URLs and split research by source.
+- **Keep the orchestrator short-lived.** Its long history is re-read on every one of its turns, so it is
+  easily the most expensive part. Let a `review` worker check a worker's result, and read only verdicts.
 
 ## What is recorded
 
