@@ -103,7 +103,7 @@ The launcher picks the mode itself (`--mode auto`, the default). The mode is sho
 | Your Claude Code login | Mode | What the worker runs |
 |---|---|---|
 | `ANTHROPIC_API_KEY` set, or `--claude-settings <file>` with an `apiKeyHelper` | **bare** | `claude -p --bare`: loads no CLAUDE.md, hooks, plugins, skills, auto-memory or MCP |
-| Subscription login: Pro, Max, Team, **Enterprise** | **lean** | `claude -p` with CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude/rules` excluded (via `claudeMdExcludes`), skills disabled, and no MCP |
+| Subscription login: Pro, Max, Team, **Enterprise** | **lean** | `claude -p` with CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude/rules` excluded (`claudeMdExcludes`), auto memory off, skills disabled, and no MCP. Hooks stay on unless `--no-hooks` |
 
 Nothing needs configuring for an Enterprise subscription. Stay logged in to `claude` as usual;
 the worker uses the same login.
@@ -113,11 +113,37 @@ the worker uses the same login.
 - **Cost on a subscription.** The `cost:` line is the list-price equivalent that Claude Code reports.
   On Enterprise you are not billed that amount: the tokens count against your plan's usage limits.
   It is still the right number for comparing tasks and profiles.
-- **Size.** A trivial task, measured with a subscription login, had a first call of about 9k
-  tokens in lean mode. Without the exclusions (`--keep-claude-md`) it was about 13k. A default
-  in-session subagent is typically 40-60k. Bare mode is expected to be a little smaller than lean.
+- **Size.** A trivial task, measured with a subscription login, had a first call of about 6k
+  tokens in lean mode, and 5k with `--no-hooks`. A default in-session subagent is typically
+  40-60k. Bare mode is expected to be about as small as lean with `--no-hooks`.
 - **User and managed settings still apply in lean mode.** That includes enterprise policy,
   proxies and your user hooks. Bare mode skips hooks.
+
+**What bare turns off, and how lean covers each item.** Measured with a subscription login,
+one-call probe:
+
+| Item | bare | lean default | Control in lean | Measured effect |
+|---|---|---|---|---|
+| CLAUDE.md, CLAUDE.local.md, AGENTS.md, `.claude/rules` | off | off | `--keep-claude-md` to keep them | about −4k (a 13.5 KB CLAUDE.md) |
+| Auto memory (also its instructions in the system prompt) | off | off | `--keep-memory` to keep it | about −3k, even with no memory files |
+| Hooks (user, project, plugins) | off | **on** | `--no-hooks`, or `"disableHooks": true` in a profile, sets `disableAllHooks` | about −1k on the test machine; depends on your hooks |
+| Skills | off | off | always off (`--disable-slash-commands`) | small |
+| MCP servers | off | off | always `--strict-mcp-config`; a profile can name servers | depends on the servers |
+| Plugins, plugin sync, LSP | off | loaded | with skills, hooks and MCP off, and the worker's tool list fixed, a plugin has no remaining way into the worker's context | none measured |
+| Background traffic (updates, telemetry) | off | on | not changed by the launcher. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in your environment turns it off; check your organisation's telemetry policy first | no context effect |
+| Keychain | not read | read | this is how the subscription login works | n/a |
+
+With the defaults, a lean worker's first call was about 6.2k tokens, and 5.2k with `--no-hooks`.
+
+Hooks stay **on** by default on purpose. An organisation may rely on hooks for secret scanning
+or command guards, and turning them off in workers would bypass those checks. Turn them off only
+when you know which hooks you have. Managed hooks (`allowManagedHooksOnly`) remain your
+organisation's decision.
+
+`CLAUDE_CODE_SAFE_MODE=1` also works with a subscription login (5.2k in the same probe). It turns
+off CLAUDE.md, skills, plugins, hooks, MCP, agents, LSP and auto memory in one go. The launcher
+does not use it, because it is documented as a troubleshooting mode, and the explicit settings
+above can be switched one at a time and are recorded in each run's `settings.json`.
 
 ## How it fits your Claude Code flow
 
@@ -180,6 +206,8 @@ dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbo
 | `--replace-system-prompt` | off | Replace Claude Code's system prompt instead of appending to it |
 | `--mode auto\|bare\|lean` | `auto` | `bare` if an API key or `--claude-settings` is present, otherwise `lean` (subscription) |
 | `--keep-claude-md` | off | Lean mode: do not exclude CLAUDE.md / AGENTS.md / `.claude/rules` |
+| `--keep-memory` | off | Lean mode: keep auto memory |
+| `--no-hooks` | off | Lean mode: `disableAllHooks` (or `"disableHooks": true` in a profile) |
 | `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper`. In lean mode it is merged with the exclusions |
 | `--no-bare` | off | Alias for `--mode lean` |
 
@@ -220,7 +248,7 @@ Checked on 2026-09-29 with Claude Code 2.1.284 and .NET SDK 10.
 - `install.ps1` under PowerShell 7.6: a full install into a sandbox home and project, the smoke
   test, and a re-run that duplicates nothing.
 
-- lean mode with a subscription login, checked with codeword probes: the worker does not see the
+- lean mode with a subscription login, checked with codeword probes (these figures are from before auto memory was turned off by default): the worker does not see the
   project's CLAUDE.md, AGENTS.md or `.claude/rules` (9.1k first call), and does see them with
   `--keep-claude-md` (13.4k). It also covers the AGENTS.md fallback, which loads when CLAUDE.md is
   excluded alone.
