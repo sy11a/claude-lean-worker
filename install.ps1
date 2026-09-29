@@ -3,7 +3,7 @@
     Installs the lean-worker skill for Claude Code. Runs without any agent.
 
 .DESCRIPTION
-    1. Checks prerequisites: claude (with --bare), .NET SDK 8+, and an API key.
+    1. Checks prerequisites: claude (with --bare), .NET SDK 8+, an API key, and (optional) opencode.
     2. Copies skills/lean-worker to the user's skills folder (default) or to a project's .claude/skills.
     3. Builds the launcher once, so the first worker run starts immediately.
     4. With -ProjectPath, prepares that project:
@@ -13,7 +13,8 @@
            without a permission prompt. The file is backed up first; use -SkipPermission to skip this step.
     5. With -SmokeTest, runs one tiny read-only worker (Haiku, budget $0.10) and prints its result block.
 
-    Safe to re-run: it updates the skill and leaves your project files alone.
+    Safe to re-run: it updates the skill and leaves your project files alone, including
+    .lean-worker/prices.json and ~/.config/lean-worker/prices.json. On Linux/macOS, install.sh does the same.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -60,9 +61,13 @@ $okSdk = $sdks | Where-Object { $_ -match '^(\d+)\.' -and [int]$Matches[1] -ge 8
 if (-not $okSdk) { Die ".NET SDK 8 or newer not found (dotnet --list-sdks: $($sdks -join '; '))" }
 Ok ("dotnet SDK: " + (($okSdk | ForEach-Object { ($_ -split ' ')[0] }) -join ', '))
 
+$opencode = Get-Command opencode -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($opencode) { Ok ("opencode: " + (& $opencode.Source --version 2>&1 | Out-String).Trim() + " (runtime ""opencode"" available)") }
+else { Ok "no opencode on PATH: only the claude runtime is available (optional)" }
+
 if ([string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY)) {
     Ok "no ANTHROPIC_API_KEY: workers will run in lean mode on your Claude Code login (Pro/Max/Team/Enterprise subscription). Make sure 'claude' is logged in."
-} else { Ok "ANTHROPIC_API_KEY is set: workers will run in bare mode (claude --bare)" }
+} else { Ok "ANTHROPIC_API_KEY is set: workers use the key (lean mode with wrap-up; bare mode when wrap-up is off)" }
 
 # ---------- 2. copy the skill ----------
 Step 'Installing the skill'
@@ -73,15 +78,19 @@ else { $skillsRoot = Join-Path $ProjectPath '.claude/skills' }
 $target = Join-Path $skillsRoot 'lean-worker'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 # Replace the skill's own files but keep a previous build (bin/obj) to save time.
-foreach ($item in @('SKILL.md', 'templates', 'launcher/Program.cs', 'launcher/LeanWorker.csproj')) {
+foreach ($item in @('SKILL.md', 'templates')) {
     $from = Join-Path $source $item
     $to = Join-Path $target $item
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
     if (Test-Path -LiteralPath $from -PathType Container) {
         if (Test-Path -LiteralPath $to) { Remove-Item -LiteralPath $to -Recurse -Force }
         Copy-Item -LiteralPath $from -Destination $to -Recurse
     } else { Copy-Item -LiteralPath $from -Destination $to -Force }
 }
+# The launcher's sources, price book and opencode plugin: every top-level file, replacing the old ones.
+$launcherTarget = Join-Path $target 'launcher'
+New-Item -ItemType Directory -Force -Path $launcherTarget | Out-Null
+Get-ChildItem -LiteralPath $launcherTarget -File | Remove-Item -Force
+Get-ChildItem -LiteralPath (Join-Path $source 'launcher') -File | Copy-Item -Destination $launcherTarget -Force
 Ok "skill installed at $target"
 
 # ---------- 3. build the launcher ----------
