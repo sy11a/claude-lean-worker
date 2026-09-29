@@ -16,7 +16,14 @@
     },
     "deepseek": { "billing": "metered", "anthropicBaseUrl": "https://api.deepseek.com/anthropic", "keyEnv": "DEEPSEEK_API_KEY" },
     "alibaba": { "billing": "metered", "keyEnv": "DASHSCOPE_API_KEY" },
-    "minimax": { "billing": "metered", "anthropicBaseUrl": "https://api.minimax.io/anthropic", "keyEnv": "MINIMAX_API_KEY" }
+    "minimax": { "billing": "metered", "anthropicBaseUrl": "https://api.minimax.io/anthropic", "keyEnv": "MINIMAX_API_KEY" },
+    "minimax-coding-plan": {
+      "billing": "subscription",
+      "priceAs": "minimax",
+      "anthropicBaseUrl": "https://api.minimax.io/anthropic",
+      "keyEnv": "MINIMAX_CODING_PLAN_API_KEY",
+      "quota": { "adapter": "minimax", "maxPercent": { "5h": 90, "weekly": 85 } }
+    }
   },
   "models": {
     "anthropic/claude-fable-5-1": { "input": 10, "output": 50, "cacheRead": 0.25, "cacheWrite": 12.5 },
