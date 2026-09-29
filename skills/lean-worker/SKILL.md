@@ -35,7 +35,8 @@ their edits.
    build/test/lint commands, conventions that matter for changes, prohibitions, and where to
    look. Start from `<skill-dir>/templates/project.md`. Fill it by reading the repository
    (build files, README, CLAUDE.md, CI config) and asking the user about anything you cannot
-   see. Keep it under about 2k tokens and link to long documents instead of pasting them,
+   see. Delete the quoted template block at its top (workers would otherwise pay for it on every
+   call) and replace every `{...}` placeholder. Keep it under about 2k tokens and link to long documents instead of pasting them,
    because every line is paid on every worker call.
 2. **`.lean-worker/profiles.json`** holds the named worker profiles (model, effort, tools,
    pre-approved commands, budget). Start from `<skill-dir>/templates/profiles.json`. Replace
