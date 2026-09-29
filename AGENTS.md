@@ -3,7 +3,10 @@
 The lean-worker skill: a launcher (`skills/lean-worker/launcher`, .NET) that runs one task in a
 minimal-context worker (`claude -p` or `opencode run`), meters its cost, wraps it up near its budget and
 records the run. A self-contained, lightweight process that works outside the fleet's release cycle;
-which models it runs on is its own concern. Future work is filed in `sy11a/Architector` (frame #589).
+which models it runs on is its own concern.
+
+Tasks are this repository's GitHub issues (labels `backlog` + `type:feature|bug|idea`), filed on the
+operator's word with `gh issue create`. A pull request that finishes one says `Closes #N`.
 
 ## Changes reach `main` through a pull request
 
