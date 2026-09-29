@@ -8,6 +8,7 @@ with its token usage and cost.
 > *"Install the lean-worker skill for this project, following
 > https://github.com/sy11a/claude-lean-worker/blob/main/INSTALL.md"*.
 > [INSTALL.md](INSTALL.md) walks the agent through the whole setup and tells it when to stop and ask you.
+> A fuller prompt to paste is in [AGENT-INSTALL-PROMPT.md](AGENT-INSTALL-PROMPT.md).
 
 ## Why
 
