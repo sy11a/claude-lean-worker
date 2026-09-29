@@ -71,6 +71,7 @@ internal static class Program
         var budget = o.MaxBudgetUsd ?? Dec(profile, "maxBudgetUsd") ?? 2m;
         var permissionMode = o.PermissionMode ?? Str(profile, "permissionMode") ?? "acceptEdits";
         var mcpConfig = o.McpConfig ?? Str(profile, "mcpConfig");
+        var noHooks = o.NoHooks || (profile?["disableHooks"] is JsonValue dh && dh.TryGetValue(out bool dhb) && dhb);
         if (!Efforts.Contains(effort)) throw new LaunchException($"invalid effort '{effort}'");
         if (!PermissionModes.Contains(permissionMode)) throw new LaunchException($"invalid permission mode '{permissionMode}'");
 
@@ -134,6 +135,9 @@ internal static class Program
             {
                 settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
             }
+            if (!o.KeepMemory) settings["autoMemoryEnabled"] = false;
+            // Hooks stay on unless asked: an organisation may rely on them (secret scanning, command guards).
+            if (noHooks) settings["disableAllHooks"] = true;
             var settingsPath = Path.GetFullPath(Path.Combine(runDir, "settings.json"));
             File.WriteAllText(settingsPath, settings.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), Utf8);
             a.AddRange(["--settings", settingsPath, "--disable-slash-commands"]);
@@ -203,6 +207,7 @@ internal static class Program
             ["model"] = model,
             ["effort"] = effort,
             ["mode"] = mode,
+            ["hooks"] = mode == "bare" ? "off (bare)" : noHooks ? "off" : "on",
             ["status"] = status,
             ["subtype"] = result?["subtype"]?.GetValue<string>(),
             ["terminal_reason"] = result?["terminal_reason"]?.GetValue<string>(),
@@ -228,7 +233,7 @@ internal static class Program
         w.WriteLine("LEAN-WORKER RESULT");
         w.WriteLine($"run:      {runDir}");
         w.WriteLine($"status:   {status}  (subtype={summary["subtype"]}, reason={summary["terminal_reason"]}, exit={exitCode})");
-        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, mode {mode}");
+        w.WriteLine($"model:    {model}, effort {effort}, profile {profileName ?? "(none)"}, mode {mode}, hooks {summary["hooks"]}");
         w.WriteLine($"work:     {Num(result?["num_turns"])} turns, {contexts.Count} API calls, {(int)elapsed.TotalMinutes}m{elapsed.Seconds:00}s");
         w.WriteLine($"cost:     ${cost.ToString("0.0000", ic)} (list price reported by Claude Code)");
         w.WriteLine($"tokens:   input {N(tok["input"])} | cache write {N(tok["cache_write"])} | cache read {N(tok["cache_read"])} | output {N(tok["output"])} (thinking {N(tok["thinking"])})");
@@ -362,6 +367,8 @@ internal sealed class Options
                                      ANTHROPIC_API_KEY or --claude-settings is set, else lean
           --no-bare                  alias for --mode lean
           --keep-claude-md           lean mode: do not exclude CLAUDE.md / AGENTS.md / .claude/rules
+          --keep-memory              lean mode: keep auto memory (off by default)
+          --no-hooks                 lean mode: disableAllHooks (profile key "disableHooks": true); hooks stay on by default
         """;
 
     public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings;
@@ -369,7 +376,7 @@ internal sealed class Options
     public List<string> AllowedTools = [];
     public decimal? MaxBudgetUsd;
     public int TimeoutMinutes = 60, ReportMaxChars = 6000;
-    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, Help;
+    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, KeepMemory, NoHooks, Help;
     public string Mode = "auto";
 
     public static Options Parse(string[] args)
@@ -400,6 +407,8 @@ internal sealed class Options
                 case "--no-bare": o.Mode = "lean"; break;
                 case "--mode": o.Mode = Next(); break;
                 case "--keep-claude-md": o.KeepClaudeMd = true; break;
+                case "--keep-memory": o.KeepMemory = true; break;
+                case "--no-hooks": o.NoHooks = true; break;
                 case "-h" or "--help": o.Help = true; break;
                 default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");
             }
