@@ -89,6 +89,8 @@ auto memory, user/project settings, user/project/plugin hooks, output style, ski
 excluded (only the user settings' `env` block is carried over). Organisation-managed hooks still run.
 Use `--keep-hooks` or `"keepHooks": true` in a profile only when a task needs one of the user's own hooks.
 An opencode worker runs on a clean opencode config: no global instructions, plugins, skills or MCP.
+Its Bash runs only the `allowedTools` patterns; any other command is denied and the worker gets a tool
+error. opencode checks every segment of a pipeline or chain (`jq … | head`), so each segment must match.
 
 A profile's `model` may be a **chain**, e.g. `["zai-coding-plan/glm-5.3", "deepseek/deepseek-v4-flash",
 "claude-sonnet-5-5"]`. The launcher takes the first model with headroom: a subscription model while

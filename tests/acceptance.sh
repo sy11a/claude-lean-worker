@@ -5,6 +5,7 @@
 # Usage: tests/acceptance.sh [--claude-only] [--keep]
 #   --claude-only  skip the cases that need opencode or a z.ai GLM Coding Plan
 #   --keep         keep the scratch directory for inspection
+# LW_OPENCODE_MODEL=<provider/model> runs the opencode permission case on that model, even with --claude-only.
 set -uo pipefail
 
 claude_only=0 keep=0
@@ -99,6 +100,13 @@ if [ $claude_only = 0 ]; then
     echo "== 9. cross-runtime continuation (claude/GLM -> opencode/GLM)"
     run --continue-from "$glmrun" --runtime opencode "${glm[@]}" --max-budget-usd 0.05
     check "success in opencode, continued_from recorded" '[ "$(field .status)" = success ] && [ "$(field .runtime)" = opencode ] && [ "$(field .continued_from)" != null ]'
+fi
+
+if [ $claude_only = 0 ] || [ -n "${LW_OPENCODE_MODEL:-}" ]; then
+    echo "== 11. opencode: a command outside allowedTools is denied, counted, and the run goes on"
+    printf 'Run the bash command `ls | head -1` exactly as written. Whatever happens, then run the bash command `ls`. Then reply DONE.\n' > "$rr/inbox/deny.md"
+    run --runtime opencode --task "$rr/inbox/deny.md" --model "${LW_OPENCODE_MODEL:-zai-coding-plan/glm-5.3}" --no-project-notes --tools Bash --allow 'Bash(ls:*)' --max-budget-usd 0.05
+    check "success with DONE, one denial counted" '[ "$(field .status)" = success ] && grep -q DONE "$last/report.md" && [ "$(field .permission_denials)" -ge 1 ]'
 fi
 
 echo "== 5. cost of a manual session"

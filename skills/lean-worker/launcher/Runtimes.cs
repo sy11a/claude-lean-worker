@@ -22,7 +22,7 @@ internal sealed class Outcome
     public string? SessionId, Subtype, TerminalReason;
     public decimal? ReportedCost;
     public long Turns, Denials, Thinking;
-    public string? LastMessageId;
+    public string? LastMessageId, LastStepReason;
     public readonly List<string> Texts = [];
 }
 
@@ -262,8 +262,10 @@ internal sealed class OpencodeRuntime : IRuntime
         }
         if (s.Tools.Contains("Bash", StringComparer.OrdinalIgnoreCase) && s.PermissionMode != "bypassPermissions")
         {
-            // Bash runs only the pre-approved patterns; anything else would prompt, and `opencode run` rejects prompts.
-            var bash = new JsonObject { ["*"] = "ask" };
+            // Bash runs only the pre-approved patterns. Anything else is denied, not "ask": `opencode run` auto-rejects
+            // a prompt and ends the session, while a denial comes back to the model as a tool error and the run goes on.
+            // opencode checks each segment of a pipeline or chain, so every segment must match a pattern.
+            var bash = new JsonObject { ["*"] = "deny" };
             foreach (var pattern in s.Allowed)
                 if (pattern.StartsWith("Bash(", StringComparison.Ordinal) && pattern.EndsWith(')'))
                     bash[pattern[5..^1].Replace(":*", "*")] = "allow";
@@ -340,8 +342,13 @@ internal sealed class OpencodeRuntime : IRuntime
                 o.IsError = true;
                 o.Texts.Add(obj["error"]?.ToJsonString() ?? "error");
                 break;
+            case "tool_use" when part is not null && part["state"] is JsonObject state && Json.Str(state, "status") == "error"
+                                 && Json.Str(state, "error") is { } err && IsPermissionError(err):
+                o.Denials++;
+                break;
             case "step_finish" when part is not null && part["tokens"] is JsonObject tok:
                 o.Turns++;
+                o.LastStepReason = Json.Str(part, "reason");
                 o.Thinking += Json.Num(tok["reasoning"]);
                 var cache = tok["cache"] as JsonObject;
                 return new Usage(Json.Str(part, "id") ?? Guid.NewGuid().ToString(), Json.Str(part, "modelID") ?? "",
@@ -351,10 +358,16 @@ internal sealed class OpencodeRuntime : IRuntime
         return null;
     }
 
+    // opencode's messages for a rule that denies the call and for a rejected permission prompt.
+    private static bool IsPermissionError(string error) =>
+        error.Contains("specified a rule which prevents", StringComparison.Ordinal)
+        || error.Contains("rejected permission", StringComparison.Ordinal);
+
     public void Finish(Outcome o, int exitCode)
     {
-        // opencode has no final result event: the run ends when the session goes idle.
-        o.HasResult = o.Texts.Count > 0;
+        // opencode has no final result event: the run ends when the session goes idle. A last step that asked for
+        // tools means the session was cut off before the model could answer (an auto-rejected permission prompt).
+        o.HasResult = o.Texts.Count > 0 && o.LastStepReason != "tool-calls";
         if (exitCode != 0) o.IsError = true;
         o.Report = string.Join("\n", o.Texts).Trim();
         o.Subtype = o.IsError ? "error" : "success";
