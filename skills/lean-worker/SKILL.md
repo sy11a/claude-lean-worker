@@ -50,7 +50,15 @@ their edits.
    effort, tools, pre-approved commands, budget, `wrapUpAt`). Start from `<skill-dir>/templates/profiles.json`. Replace
    the `{build command}` and `{test command}` placeholders with the project's real commands,
    and add a profile for any task class the project needs, such as a slow integration-test suite
-   or a code generator.
+   or a code generator. The base template runs on Claude. When the user has another model plan, ask
+   which, and merge the matching family from `<skill-dir>/templates/profiles/`. Each family has
+   `read-<family>`, `edit-<family>`, `code-<family>` and `review-<family>`, and its `_comment` holds
+   the plan's notes. The families:
+   - `minimax.json`: MiniMax Token Plan;
+   - `glm.json`: z.ai GLM Coding Plan;
+   - `alibaba.json`: Alibaba Model Studio Token Plan (Qwen, DeepSeek). Not verified: it needs your opencode provider id and prices.
+
+   Each family's chains end in Claude, which runs only on an `escalate:` go.
 
 `.lean-worker/` is shared by every coding tool that uses the launcher (Claude Code and opencode
 orchestrators alike); nothing tool-specific goes in it. An optional `.lean-worker/prices.json` adds or

@@ -360,3 +360,32 @@ public class WriteScopeTests
         finally { Directory.Delete(dir, true); }
     }
 }
+
+public class TemplateTests
+{
+    private static string Templates()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !Directory.Exists(Path.Combine(d.FullName, "skills", "lean-worker", "templates"))) d = d.Parent;
+        return Path.Combine(d!.FullName, "skills", "lean-worker", "templates");
+    }
+
+    [Fact]
+    public void Family_profiles_parse_name_their_family_and_end_their_chains_in_claude()
+    {
+        var files = Directory.GetFiles(Path.Combine(Templates(), "profiles"), "*.json");
+        Assert.NotEmpty(files);
+        foreach (var f in files)
+        {
+            var family = Path.GetFileNameWithoutExtension(f);
+            var profiles = JsonNode.Parse(File.ReadAllText(f))!["profiles"]!.AsObject();
+            Assert.Equal(["code", "edit", "read", "review"], profiles.Select(p => p.Key.Replace("-" + family, "")).Order());
+            foreach (var (_, p) in profiles)
+            {
+                var chain = p!["model"]!.AsArray().Select(m => m!.GetValue<string>()).ToList();
+                Assert.True(chain.Count >= 2 && chain[^1].StartsWith("claude-", StringComparison.Ordinal), $"{f}: {string.Join(",", chain)}");
+                Assert.DoesNotContain("claude-", chain[0]);
+            }
+        }
+    }
+}

@@ -1,0 +1,92 @@
+{
+  "_comment": "z.ai GLM Coding Plan (subscription; opencode login `zai-coding-plan`, or ZAI_API_KEY for the claude runtime; quota adapter `zai`). Mind the plan's peak-hour multiplier. Merge the profiles you need into .lean-worker/profiles.json and replace the {build command} / {test command} placeholders. Each chain ends in Claude: it runs only when the operator gives the go on an `escalate:` line. Bash runs only the allowedTools patterns and every segment of a pipeline must match, so the common read-only helpers are pre-approved. Give code tasks --write-scope: these models have edited files outside the task's scope. Review a change with a model of another family than the one that wrote it (for example review-<other family>, or the base template's Claude review). Runtime is claude (the plan's Anthropic-compatible endpoint), so an escalation to Claude stays in the same runtime; \"runtime\": \"opencode\" also works and starts with a smaller context.",
+  "profiles": {
+    "read-glm": {
+      "model": [
+        "zai-coding-plan/glm-5.3-flash",
+        "claude-haiku-4-5"
+      ],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "allowedTools": [],
+      "maxBudgetUsd": 0.3
+    },
+    "edit-glm": {
+      "model": [
+        "zai-coding-plan/glm-5.3",
+        "claude-sonnet-5"
+      ],
+      "tools": [
+        "Read",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "allowedTools": [],
+      "maxBudgetUsd": 0.5
+    },
+    "code-glm": {
+      "model": [
+        "zai-coding-plan/glm-5.3",
+        "claude-sonnet-5"
+      ],
+      "wrapUpAt": 0.9,
+      "tools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash({build command}:*)",
+        "Bash({test command}:*)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(ls:*)",
+        "Bash(pwd)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(wc:*)",
+        "Bash(grep:*)",
+        "Bash(sed -n:*)",
+        "Bash(jq:*)",
+        "Bash(echo:*)"
+      ],
+      "maxBudgetUsd": 2
+    },
+    "review-glm": {
+      "model": [
+        "zai-coding-plan/glm-5.3",
+        "claude-opus-5-5"
+      ],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash({test command}:*)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(ls:*)",
+        "Bash(pwd)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(wc:*)",
+        "Bash(grep:*)",
+        "Bash(sed -n:*)",
+        "Bash(jq:*)",
+        "Bash(echo:*)"
+      ],
+      "maxBudgetUsd": 0.5
+    }
+  }
+}
