@@ -54,7 +54,8 @@ their edits.
    plans (MiniMax Token Plan, z.ai GLM Coding Plan, ...), start instead from
    `<skill-dir>/templates/profiles-chains.json`. Its roles carry model chains across plans, in the user's
    priority order and with Claude last. Delete the models of plans the user does not have. What a
-   model needs in a profile (pipeline helpers, write scope, quirks) is in `<skill-dir>/models.md`.
+   model needs beyond the role is applied at launch from the price book's `modelTraits` (the
+   `note: model traits …` line says so); `<skill-dir>/models.md` explains each model.
 
 `.lean-worker/` is shared by every coding tool that uses the launcher (Claude Code and opencode
 orchestrators alike); nothing tool-specific goes in it. An optional `.lean-worker/prices.json` adds or

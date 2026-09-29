@@ -1,5 +1,5 @@
 {
-  "_comment": "Roles with model chains across plans. The launcher runs the first model with quota headroom and offers the next one only on an `escalate:` line, so the order is the user's priority; Claude comes last. Delete the models of plans the user does not have, then replace {build command} / {test command}. What each model needs (pipeline helpers, write scope, known quirks) is in <skill-dir>/models.md. Every model here runs in the claude runtime through its plan's Anthropic-compatible endpoint; a model that runs only in opencode (the Alibaba Token Plan's) needs \"runtime\": \"opencode\" and a separate profile.",
+  "_comment": "Roles with model chains across plans. The launcher runs the first model with quota headroom and offers the next one only on an `escalate:` line, so the order is the user's priority; Claude comes last. Delete the models of plans the user does not have, then replace {build command} / {test command}. What a model needs beyond the role (for example the pipeline helpers MiniMax-M3 uses) comes from the price book's modelTraits at launch; see <skill-dir>/models.md. Leave \"runtime\" unset: each model then runs in the runtime its provider allows (claude where the plan has an Anthropic-compatible endpoint, else opencode).",
   "defaultProfile": "code",
   "profiles": {
     "read": {
@@ -56,14 +56,7 @@
         "Bash(git status:*)",
         "Bash(git log:*)",
         "Bash(ls:*)",
-        "Bash(pwd)",
-        "Bash(head:*)",
-        "Bash(tail:*)",
-        "Bash(wc:*)",
-        "Bash(grep:*)",
-        "Bash(sed -n:*)",
-        "Bash(jq:*)",
-        "Bash(echo:*)"
+        "Bash(pwd)"
       ],
       "maxBudgetUsd": 2
     },
@@ -100,14 +93,7 @@
         "Bash(git status:*)",
         "Bash(git log:*)",
         "Bash(ls:*)",
-        "Bash(pwd)",
-        "Bash(head:*)",
-        "Bash(tail:*)",
-        "Bash(wc:*)",
-        "Bash(grep:*)",
-        "Bash(sed -n:*)",
-        "Bash(jq:*)",
-        "Bash(echo:*)"
+        "Bash(pwd)"
       ],
       "maxBudgetUsd": 0.5
     }

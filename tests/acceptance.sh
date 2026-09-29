@@ -104,9 +104,16 @@ fi
 
 if [ $claude_only = 0 ] || [ -n "${LW_OPENCODE_MODEL:-}" ]; then
     echo "== 11. opencode: a command outside allowedTools is denied, counted, and the run goes on"
-    printf 'Run the bash command `ls | head -1` exactly as written. Whatever happens, then run the bash command `ls`. Then reply DONE.\n' > "$rr/inbox/deny.md"
+    printf 'Run the bash command `ls | sort` exactly as written. Whatever happens, then run the bash command `ls`. Then reply DONE.\n' > "$rr/inbox/deny.md"
     run --runtime opencode --task "$rr/inbox/deny.md" --model "${LW_OPENCODE_MODEL:-zai-coding-plan/glm-5.3}" --no-project-notes --tools Bash --allow 'Bash(ls:*)' --max-budget-usd 0.05
     check "success with DONE, one denial counted" '[ "$(field .status)" = success ] && grep -q DONE "$last/report.md" && [ "$(field .permission_denials)" -ge 1 ]'
+
+    echo "== 14. model traits add the model's allowed commands"
+    ocm="${LW_OPENCODE_MODEL:-zai-coding-plan/glm-5.3}"
+    printf '{"modelTraits":{"%s":{"allowedTools":["Bash(head:*)"],"note":"acceptance trait"}}}\n' "${ocm#*/}" > "$scratch/traits.json"
+    printf 'Run the bash command `ls | head -1` exactly as written. Then reply DONE.\n' > "$rr/inbox/traits.md"
+    run --runtime opencode --task "$rr/inbox/traits.md" --model "$ocm" --prices "$scratch/traits.json" --no-project-notes --tools Bash --allow 'Bash(ls:*)' --max-budget-usd 0.05
+    check "no denial, the trait recorded and noted" '[ "$(field .status)" = success ] && [ "$(field .permission_denials)" = 0 ] && [ "$(field .model_traits)" = "${ocm#*/}" ] && grep -q "acceptance trait" "$scratch/out.txt"'
 
     echo "== 12. a write outside the task's write scope is reported"
     saved="$cwd" cwd="$scratch/repo"
