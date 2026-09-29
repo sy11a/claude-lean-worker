@@ -1,0 +1,96 @@
+{
+  "_comment": "Alibaba Model Studio Token Plan (Qwen, and DeepSeek through the same plan). NOT VERIFIED: rename `alibaba-token-plan` to the id of your opencode provider for the plan (an OpenAI-compatible provider whose baseURL is the plan's compatible-mode endpoint), and add the provider (billing: subscription) and its models to .lean-worker/prices.json, or the launcher prices them at its unknown-model fallback. No quota adapter yet. DeepSeek on the same plan: e.g. alibaba-token-plan/deepseek-v4-pro. Merge the profiles you need into .lean-worker/profiles.json and replace the {build command} / {test command} placeholders. Each chain ends in Claude: it runs only when the operator gives the go on an `escalate:` line. Bash runs only the allowedTools patterns and every segment of a pipeline must match, so the common read-only helpers are pre-approved. Give code tasks --write-scope: these models have edited files outside the task's scope. Review a change with a model of another family than the one that wrote it (for example review-<other family>, or the base template's Claude review). Runtime is opencode (the plan has no Anthropic-compatible endpoint in the price book); when you escalate to Claude, add --runtime claude.",
+  "profiles": {
+    "read-alibaba": {
+      "model": [
+        "alibaba-token-plan/qwen3.8-flash",
+        "claude-haiku-4-5"
+      ],
+      "runtime": "opencode",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "allowedTools": [],
+      "maxBudgetUsd": 0.3
+    },
+    "edit-alibaba": {
+      "model": [
+        "alibaba-token-plan/qwen3.8-max",
+        "claude-sonnet-5"
+      ],
+      "runtime": "opencode",
+      "tools": [
+        "Read",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "allowedTools": [],
+      "maxBudgetUsd": 0.5
+    },
+    "code-alibaba": {
+      "model": [
+        "alibaba-token-plan/qwen3.8-max",
+        "claude-sonnet-5"
+      ],
+      "runtime": "opencode",
+      "wrapUpAt": 0.9,
+      "tools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash({build command}:*)",
+        "Bash({test command}:*)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(ls:*)",
+        "Bash(pwd)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(wc:*)",
+        "Bash(grep:*)",
+        "Bash(sed -n:*)",
+        "Bash(jq:*)",
+        "Bash(echo:*)"
+      ],
+      "maxBudgetUsd": 2
+    },
+    "review-alibaba": {
+      "model": [
+        "alibaba-token-plan/qwen3.8-max",
+        "claude-opus-5-5"
+      ],
+      "runtime": "opencode",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash"
+      ],
+      "allowedTools": [
+        "Bash({test command}:*)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(ls:*)",
+        "Bash(pwd)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(wc:*)",
+        "Bash(grep:*)",
+        "Bash(sed -n:*)",
+        "Bash(jq:*)",
+        "Bash(echo:*)"
+      ],
+      "maxBudgetUsd": 0.5
+    }
+  }
+}
