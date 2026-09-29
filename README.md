@@ -4,6 +4,11 @@ A Claude Code skill that runs one coding task in a separate, minimal-context wor
 (`claude -p --bare`). The orchestrating session gets back the worker's report together
 with its token usage and cost.
 
+> **Quick install through your agent:** in a Claude Code session in your project, say
+> *"Install the lean-worker skill for this project, following
+> https://github.com/sy11a/claude-lean-worker/blob/main/INSTALL.md"*.
+> [INSTALL.md](INSTALL.md) walks the agent through the whole setup and tells it when to stop and ask you.
+
 ## Why
 
 An in-session subagent inherits the project's CLAUDE.md, the skill listing, every MCP
