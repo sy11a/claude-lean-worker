@@ -99,6 +99,9 @@ internal static class Launcher
         var variant = o.Variant ?? Json.Str(profile, "variant");
         var tools = o.Tools ?? Json.StrList(profile, "tools") ?? ["Read", "Edit", "Write", "Glob", "Grep", "Bash"];
         var allowed = o.AllowedTools.Count > 0 ? o.AllowedTools : Json.StrList(profile, "allowedTools") ?? [];
+        // The paths the task may write; a continuation keeps its original run's scope.
+        var writeScope = o.WriteScope.Count > 0 ? o.WriteScope
+            : Json.StrList(profile, "writeScope") ?? Json.StrList(prevSummary, "write_scope");
         var budget = o.MaxBudgetUsd ?? Json.Dec(profile, "maxBudgetUsd") ?? 2m;
         // Share of the budget after which the wrap-up hook blocks tools; 0 turns it off.
         var wrapUpAt = o.WrapUpAt ?? Json.Dec(profile, "wrapUpAt") ?? 0.8m;
@@ -221,6 +224,7 @@ internal static class Launcher
         var prepared = runtime.Prepare(spec);
         File.WriteAllText(Path.Combine(runDir, "command.txt"), prepared.CommandText, Json.Utf8);
 
+        var treeBefore = WriteScope.Take(Directory.GetCurrentDirectory(), runsRoot);
         var meter = new Meter(prices, provider, runDir, budget, wrapUp ? wrapUpAt : null, Meter.HandoffInstruction);
         var outcome = new Outcome();
         var streamPath = Path.Combine(runDir, "stream.jsonl");
@@ -233,6 +237,9 @@ internal static class Launcher
         });
         runtime.Finish(outcome, exitCode);
         var elapsed = DateTimeOffset.Now - started;
+        var treeAfter = treeBefore is null ? null : WriteScope.Take(treeBefore.Root, runsRoot);
+        var changed = treeBefore is null || treeAfter is null ? null : WriteScope.Changed(treeBefore, treeAfter);
+        var outOfScope = changed is null || writeScope is null ? null : changed.Where(f => !WriteScope.InScope(f, writeScope)).ToList();
         notes.AddRange(meter.Notes);
 
         QuotaReading? quotaAfter = null;
@@ -297,6 +304,9 @@ internal static class Launcher
             ["context_first_call"] = first,
             ["context_peak"] = peak,
             ["permission_denials"] = outcome.Denials,
+            ["write_scope"] = writeScope is null ? null : new JsonArray(writeScope.Select(p => (JsonNode)p).ToArray()),
+            ["changed_files"] = changed is null ? null : new JsonArray(changed.Select(p => (JsonNode)p).ToArray()),
+            ["out_of_scope"] = outOfScope is null ? null : new JsonArray(outOfScope.Select(p => (JsonNode)p).ToArray()),
             ["session_id"] = outcome.SessionId,
             ["quota_before"] = quotaBefore?.ToJson(),
             ["quota_after"] = quotaAfter?.ToJson(),
@@ -328,10 +338,15 @@ internal static class Launcher
         w.WriteLine($"tokens:   input {N(tok["input"])} | cache write {N(tok["cache_write"])} | cache read {N(tok["cache_read"])} | output {N(tok["output"])} (thinking {N(tok["thinking"])})");
         w.WriteLine($"context:  first call {first.ToString("N0", ic)} | peak {peak.ToString("N0", ic)}");
         if (quotaAfter is not null) w.WriteLine($"quota:    {quotaAfter.Line(quotaBefore)}");
+        if (changed is not null)
+            w.WriteLine($"files:    {changed.Count} changed in the working tree{(outOfScope is null ? " (no write scope given)" : $", {outOfScope.Count} outside the write scope")}");
         foreach (var n in notes) w.WriteLine($"note:     {n}");
         if (meter.WrappedUp) w.WriteLine($"continue: --continue-from \"{Path.GetFullPath(runDir)}\" (fresh worker, original task + this handoff; ask the operator first)");
         else if (next is not null) w.WriteLine($"escalate: --continue-from \"{Path.GetFullPath(runDir)}\" --model {next} (next in the profile's chain; ask the operator first)");
         if (!meter.WrappedUp && outcome.Denials > 0) w.WriteLine($"WARNING:  {outcome.Denials} permission denial(s); see stream.jsonl. Add the needed commands to the profile's allowedTools.");
+        if (outOfScope is { Count: > 0 })
+            w.WriteLine($"WARNING:  {outOfScope.Count} file(s) changed outside the write scope: {string.Join(", ", outOfScope.Take(5))}" +
+                        $"{(outOfScope.Count > 5 ? $" (+{outOfScope.Count - 5} more, see summary.json)" : "")}. Check them before accepting the run.");
         w.WriteLine("--- worker report ---");
         if (report.Length > o.ReportMaxChars)
         {

@@ -12,7 +12,7 @@
 - {any other observable check}
 
 ## Boundaries
-- Do not modify files outside: `{paths}`.
+- Do not modify files outside: `{paths}` (launch with the same paths as `--write-scope`, so the launcher checks it).
 - Do not commit, push, or change configuration, CI or dependencies unless stated here.
 - If the task turns out to need a decision not covered here, stop and say so in the report.
 

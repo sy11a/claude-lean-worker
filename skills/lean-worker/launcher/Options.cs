@@ -20,6 +20,8 @@ internal sealed class Options
           --variant <name>           opencode model variant (profile key "variant")
           --tools <A,B,C>            built-in tools available to the worker (Claude Code names)
           --allow <pattern>          pre-approved tool pattern, repeatable, e.g. --allow "Bash(git diff:*)"
+          --write-scope <glob>       a path the task may write, repeatable, relative to the git root (e.g. "src/Foo/**");
+                                     files the run changed outside it are reported (profile key "writeScope")
           --mcp-config <file>        MCP servers for this run only (claude runtime; always --strict-mcp-config)
           --max-budget-usd <n>       spend cap for the run, metered by the launcher with prices.json
           --wrap-up-at <share>       past this share of the budget tools are blocked and the worker writes a
@@ -56,7 +58,7 @@ internal sealed class Options
     public string? TaskFile, Profile, SystemFile, Name, Model, Effort, Variant, McpConfig, PermissionMode, RunsRoot,
                    ClaudeSettings, CacheTtl, ContinueFrom, Runtime, PricesFile;
     public List<string>? Tools;
-    public List<string> AllowedTools = [];
+    public List<string> AllowedTools = [], WriteScope = [];
     public decimal? MaxBudgetUsd, WrapUpAt;
     public int TimeoutMinutes = 60, ReportMaxChars = 6000;
     public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, KeepMemory, KeepHooks, NoUserEnv, Help;
@@ -81,6 +83,7 @@ internal sealed class Options
                 case "--variant": o.Variant = Next(); break;
                 case "--tools": o.Tools = Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); break;
                 case "--allow": o.AllowedTools.Add(Next()); break;
+                case "--write-scope": o.WriteScope.Add(Next()); break;
                 case "--mcp-config": o.McpConfig = Next(); break;
                 case "--max-budget-usd": o.MaxBudgetUsd = decimal.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--wrap-up-at": o.WrapUpAt = decimal.Parse(Next(), CultureInfo.InvariantCulture); break;
