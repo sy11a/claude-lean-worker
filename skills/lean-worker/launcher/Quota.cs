@@ -117,7 +117,8 @@ internal static class Quota
         {
             var model = Json.Str(m, "model_name") ?? "?";
             var prefix = model == "general" ? "" : model + "-";
-            var hours = (Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000;
+            // Round to the nearest hour: MiniMax reports a 5 h window a little short at times (4 h 59 m).
+            var hours = (long)Math.Round((Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000.0);
             windows.Add(Window($"{prefix}{(hours > 0 ? $"{hours}h" : "interval")}", m, "current_interval", "end_time"));
             windows.Add(Window($"{prefix}weekly", m, "current_weekly", "weekly_end_time"));
         }

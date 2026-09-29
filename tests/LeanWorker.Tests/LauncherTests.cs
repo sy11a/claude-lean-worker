@@ -256,6 +256,16 @@ public class MinimaxQuotaTests
     }
 
     [Fact]
+    public void A_window_a_little_short_of_five_hours_is_still_5h()
+    {
+        var q = Quota.ParseMinimax("m", """
+            {"model_remains":[{"model_name":"general","start_time":1790694000000,"end_time":1790711940000,
+              "current_interval_remaining_percent":100,"current_weekly_remaining_percent":100}],"base_resp":{"status_code":0}}
+            """);
+        Assert.Equal("5h", q.Windows[0].Name);
+    }
+
+    [Fact]
     public void An_error_status_is_a_launch_failure()
     {
         Assert.Throws<LaunchException>(() => Quota.ParseMinimax("m", """{"base_resp":{"status_code":1004,"status_msg":"invalid key"}}"""));
