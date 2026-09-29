@@ -134,6 +134,34 @@ public class StreamParsingTests
     }
 
     [Fact]
+    public void Opencode_denied_and_rejected_tool_calls_count_as_denials()
+    {
+        var rt = new OpencodeRuntime();
+        var o = new Outcome();
+        rt.Parse(L("""{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"The user has specified a rule which prevents you from using this specific tool call."}}}"""), o);
+        rt.Parse(L("""{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"The user rejected permission to use this specific tool call."}}}"""), o);
+        rt.Parse(L("""{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"exit code 1"}}}"""), o);
+        rt.Parse(L("""{"type":"tool_use","part":{"tool":"bash","state":{"status":"completed"}}}"""), o);
+        Assert.Equal(2L, o.Denials);
+    }
+
+    [Fact]
+    public void Opencode_session_cut_off_after_a_tool_call_has_no_result()
+    {
+        var rt = new OpencodeRuntime();
+        var o = new Outcome();
+        rt.Parse(L("""{"type":"text","part":{"messageID":"a","text":"Now let me look at the fixtures."}}"""), o);
+        rt.Parse(L("""{"type":"step_finish","part":{"id":"p1","reason":"tool-calls","tokens":{"input":1,"output":1,"reasoning":0,"cache":{"write":0,"read":0}}}}"""), o);
+        rt.Finish(o, 0);
+        Assert.False(o.HasResult);
+
+        rt.Parse(L("""{"type":"text","part":{"messageID":"b","text":"DONE"}}"""), o);
+        rt.Parse(L("""{"type":"step_finish","part":{"id":"p2","reason":"stop","tokens":{"input":1,"output":1,"reasoning":0,"cache":{"write":0,"read":0}}}}"""), o);
+        rt.Finish(o, 0);
+        Assert.True(o.HasResult);
+    }
+
+    [Fact]
     public void Opencode_run_without_text_has_no_result()
     {
         var o = new Outcome();
