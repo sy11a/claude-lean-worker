@@ -73,9 +73,10 @@ passing a long list of flags. For a one-off, any profile value can be overridden
 `--permission-mode` (`--help` lists everything).
 Design work and hard judgement stay with you; they do not go to a worker.
 
-In lean mode (subscription login), hooks stay on by default. Suggest `"disableHooks": true` in a
-profile, or `--no-hooks`, only after the user confirms that no hook their organisation relies on
-(secret scanning, command guards) would be bypassed.
+In lean mode (subscription login), the worker gets none of the user's personal integrations:
+CLAUDE.md at every level, auto memory, user/project/plugin hooks, output style, skills and MCP
+are all excluded. Organisation-managed hooks still run. Use `--keep-hooks` or `"keepHooks": true`
+in a profile only when a task needs one of the user's own hooks.
 
 ## 3. Run it
 
