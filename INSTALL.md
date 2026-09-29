@@ -21,12 +21,12 @@ Clone it into a temporary folder, not into the project:
 git clone --depth 1 https://github.com/sy11a/claude-lean-worker.git "<temp-dir>/claude-lean-worker"
 ```
 
-- On Windows, use `$env:TEMP` (PowerShell) or `$TEMP` (Git Bash) for `<temp-dir>`.
+- On Linux or macOS, use `${TMPDIR:-/tmp}` for `<temp-dir>`. On Windows, use `$env:TEMP` (PowerShell) or `$TEMP` (Git Bash).
 - **If the clone fails** (network policy, proxy, GitHub blocked), stop. Ask the user to download
   the repository ZIP and tell you where they extracted it. Do not look for workarounds around
   the network policy.
 
-Success: `<repo copy>/install.ps1` and `<repo copy>/skills/lean-worker/SKILL.md` exist.
+Success: `<repo copy>/install.sh`, `<repo copy>/install.ps1` and `<repo copy>/skills/lean-worker/SKILL.md` exist.
 
 ## Step 2: Check prerequisites
 
@@ -36,18 +36,19 @@ Run each command and report the result to the user in one short list:
 |---|---|---|
 | Claude Code supports `--bare` | `claude --help` (look for `--bare`) | yes: stop and tell the user to update Claude Code |
 | .NET SDK 8 or newer | `dotnet --list-sdks` | yes: stop and tell the user to install it |
-| How Claude Code is authenticated | check whether `ANTHROPIC_API_KEY` is set (**never print its value**); if not, the user is on a subscription login (Pro/Max/Team/Enterprise) | no: either works. Key → workers run in **bare** mode; subscription → **lean** mode. Do not ask for an API key on a subscription |
-| PowerShell | `powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"` (or `pwsh`) | yes |
+| How Claude Code is authenticated | check whether `ANTHROPIC_API_KEY` is set (**never print its value**); if not, the user is on a subscription login (Pro/Max/Team/Enterprise) | no: either works. Workers run in **lean** mode either way (bare mode only with a key and wrap-up off). Do not ask for an API key on a subscription |
+| A shell for the installer | Linux/macOS: `bash --version` (and `jq --version` for the permission step). Windows: `powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"` (or `pwsh`) | yes |
+| opencode (optional) | `opencode --version` | no: needed only for workers with `"runtime": "opencode"` |
 
 ## Step 3: Ask the user two questions
 
 Ask them together, in one message, and wait for the answer:
 
 1. **Where should the skill be installed?**
-   - (a) For the user, in `%USERPROFILE%\.claude\skills`, so it is available in every project.
-     This is the recommended option.
-   - (b) For this project only, in `<project root>\.claude\skills`, which can be committed and shared with the team.
-2. **May the installer add a permission rule to `<project root>\.claude\settings.json`?** The rule
+   - (a) For the user, in `~/.claude/skills` (Windows: `%USERPROFILE%\.claude\skills`), so it is available
+     in every project. This is the recommended option.
+   - (b) For this project only, in `<project root>/.claude/skills`, which can be committed and shared with the team.
+2. **May the installer add a permission rule to `<project root>/.claude/settings.json`?** The rule
    is `Bash(dotnet run --project:*)`, and it lets the orchestrator start workers without a prompt
    each time.
    - The installer backs the file up first as `settings.json.bak-<stamp>`.
@@ -56,23 +57,30 @@ Ask them together, in one message, and wait for the answer:
 
 ## Step 4: Run the installer
 
-Run it from anywhere, pointing at the project root. On Windows the shell tool may be Git Bash;
-call PowerShell explicitly:
+Run it from anywhere, pointing at the project root.
+
+Linux or macOS:
+
+```
+bash "<repo copy>/install.sh" --project "<project root>" [--scope project] [--skip-permission]
+```
+
+Windows (the shell tool may be Git Bash; call PowerShell explicitly):
 
 ```
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<repo copy>/install.ps1" -ProjectPath "<project root>" [-Scope Project] [-SkipPermission]
 ```
 
-- Add `-Scope Project` if the user chose (b) in question 1.
-- Add `-SkipPermission` if the user said no to question 2.
-- Use `pwsh` instead of `powershell.exe` if Windows PowerShell is not available.
+- Add `--scope project` / `-Scope Project` if the user chose (b) in question 1.
+- Add `--skip-permission` / `-SkipPermission` if the user said no to question 2.
+- On Windows, use `pwsh` instead of `powershell.exe` if Windows PowerShell is not available.
 - **If `-ExecutionPolicy Bypass` is refused** (organisation policy), stop and tell the user.
   Do not work around it.
 
 Read the output. Success means:
 
 - every line is `ok` or `WARN`, and the last section is `== Done`;
-- `.lean-worker\project.md` and `.lean-worker\profiles.json` exist in the project root;
+- `.lean-worker/project.md` and `.lean-worker/profiles.json` exist in the project root;
 - `.gitignore` covers `.lean-worker/runs/`, `.lean-worker/inbox/` and `.lean-worker/runs.jsonl`.
 
 If a line says `FAIL`, stop. Report that line to the user and follow what it says.
@@ -105,6 +113,10 @@ it to one message with at most five questions.
   Add any other commands a coding worker needs routinely, such as a formatter or a code
   generator. Keep the list short.
 - Keep the other profiles (`read`, `edit`, `research`, `review`) unless the user wants changes.
+  Delete `research` if the user's policy bars web access for agents.
+- Ask whether the user runs other providers (GLM, DeepSeek, Qwen, MiniMax) or opencode. If so, offer
+  model chains (`"model": ["zai-coding-plan/glm-5.3", "claude-sonnet-5-5"]`) and `"runtime"`; see the
+  README section "Models, prices and subscriptions". Do not change prices unless the user asks.
 - If the project has an obvious extra task class (a slow integration-test suite, a separate
   frontend), propose a profile for it. Add it only if the user agrees.
 - The file must stay valid JSON.
@@ -125,11 +137,10 @@ dotnet run --project "<skill-dir>/launcher" -c Release -- --task ".lean-worker/i
 Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 `Do not read or change any file. Reply with exactly one line: lean-worker smoke test OK`.
 
-`<skill-dir>` is where the skill was installed: `%USERPROFILE%\.claude\skills\lean-worker`, or
-`<project root>\.claude\skills\lean-worker`.
+`<skill-dir>` is where the skill was installed: `~/.claude/skills/lean-worker`
+(Windows: `%USERPROFILE%\.claude\skills\lean-worker`), or `<project root>/.claude/skills/lean-worker`.
 
-- The launcher picks the mode itself: bare with an API key, lean on a subscription login.
-  The result block shows which one ran.
+- The launcher picks the mode itself; the result block shows which one ran.
 - **If it fails with "Not logged in":** in lean mode, ask the user to run `claude` and `/login`.
   In bare mode, the key is missing or invalid.
 - **Success:** the block starts with `LEAN-WORKER RESULT`, shows `status: success`, and the worker
@@ -161,4 +172,6 @@ Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 | `'claude' is not on PATH` from the launcher | Claude Code is installed for another shell | Add its folder to PATH, or reinstall with the native installer |
 | Permission prompts on every launch | Rule not added, or a different command shape | Add `Bash(dotnet run --project:*)` to `.claude/settings.json` `permissions.allow` |
 | `WARNING: n permission denial(s)` in a result | The worker needed a command not pre-approved | Add that command prefix to the profile's `allowedTools` |
-| Build error on the first run | SDK older than 8, or a corrupted copy | Check `dotnet --list-sdks`, then re-run `install.ps1` |
+| Build error on the first run | SDK older than 8, or a corrupted copy | Check `dotnet --list-sdks`, then re-run the installer |
+| `note: no price for <model>; priced as dearest` | The model is not in the price book | Add it to `.lean-worker/prices.json` (see the README) |
+| `no API key for provider '<name>'` | A non-Anthropic model with no key | Set the provider's `keyEnv` variable, or log in with `opencode auth login` |
