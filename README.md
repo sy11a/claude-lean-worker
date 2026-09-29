@@ -86,8 +86,8 @@ The orchestrator reads the repository and asks you about anything it cannot see.
   lint commands, conventions, prohibitions, and where to look. Keep it short (target under 2k
   tokens), because it is paid for on every worker API call.
 - **`.lean-worker/profiles.json`**: named profiles (`read`, `edit`, `code`, `research`, `review`).
-  Each one sets the model, effort, tools, pre-approved commands and budget. The `<build command>`
-  and `<test command>` placeholders are replaced with your own commands, and you add profiles
+  Each one sets the model, effort, tools, pre-approved commands and budget. The `{build command}`
+  and `{test command}` placeholders are replaced with your own commands, and you add profiles
   for your own task classes.
 
 Then **read and edit both files by hand**. They are yours, and the skill never overwrites your edits.

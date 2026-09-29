@@ -39,7 +39,7 @@ their edits.
    because every line is paid on every worker call.
 2. **`.lean-worker/profiles.json`** holds the named worker profiles (model, effort, tools,
    pre-approved commands, budget). Start from `<skill-dir>/templates/profiles.json`. Replace
-   the `<build command>` and `<test command>` placeholders with the project's real commands,
+   the `{build command}` and `{test command}` placeholders with the project's real commands,
    and add a profile for any task class the project needs, such as a slow integration-test suite
    or a code generator.
 

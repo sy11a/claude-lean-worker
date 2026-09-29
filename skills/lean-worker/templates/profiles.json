@@ -19,7 +19,7 @@
       "model": "claude-sonnet-5",
       "effort": "medium",
       "tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
-      "allowedTools": ["Bash(<build command>:*)", "Bash(<test command>:*)", "Bash(git diff:*)", "Bash(git status:*)"],
+      "allowedTools": ["Bash({build command}:*)", "Bash({test command}:*)", "Bash(git diff:*)", "Bash(git status:*)"],
       "maxBudgetUsd": 3
     },
     "research": {

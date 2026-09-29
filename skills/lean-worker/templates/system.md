@@ -1,6 +1,10 @@
-<!--
-Optional, per task. Appended after .lean-worker/project.md.
-Use it only for notes that matter to this one task: the module's quirks, a specific API,
-a pitfall found in an earlier run. Anything that holds for every task belongs in project.md.
--->
-- <note that applies to this task only>
+> **Template: per-task notes (optional).** Copy it next to a task as `system.md` only when this
+> one task needs extra context, for example a module's quirks, a specific API, or a pitfall
+> found in an earlier run. It is appended after `.lean-worker/project.md`. Anything true for
+> every task belongs in `project.md` instead. Delete this quoted block, then replace the
+> `{...}` placeholders.
+
+## Notes for this task
+
+- {note that applies to this task only}
+- {another note, or delete this line}

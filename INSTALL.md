@@ -80,7 +80,7 @@ If a line says `FAIL`, stop. Report that line to the user and follow what it say
 ## Step 5: Fill in `.lean-worker/project.md`
 
 This file is the context every worker receives, and it is paid for on every worker API call.
-**Target: under ~2,000 tokens.** Replace every `<...>` placeholder:
+**Target: under ~2,000 tokens.** Delete the quoted template block at the top, then replace every `{...}` placeholder:
 
 1. **Stack and layout:** read the build files (`*.sln`, `*.csproj`, `Directory.Build.props`,
    `package.json`, `pom.xml`, … whatever exists), the top-level README and CLAUDE.md, and the CI
@@ -100,7 +100,7 @@ it to one message with at most five questions.
 
 ## Step 6: Fill in `.lean-worker/profiles.json`
 
-- In the `code` profile, replace `Bash(<build command>:*)` and `Bash(<test command>:*)` with
+- In the `code` profile, replace `Bash({build command}:*)` and `Bash({test command}:*)` with
   the project's real command prefixes, e.g. `Bash(dotnet test:*)` or `Bash(npm run test:*)`.
   Add any other commands a coding worker needs routinely, such as a formatter or a code
   generator. Keep the list short.
