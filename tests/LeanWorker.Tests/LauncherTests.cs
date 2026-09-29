@@ -299,3 +299,64 @@ public class MinimaxQuotaTests
         Assert.Throws<LaunchException>(() => Quota.ParseMinimax("m", """{"base_resp":{"status_code":1004,"status_msg":"invalid key"}}"""));
     }
 }
+
+public class WriteScopeTests
+{
+    [Theory]
+    [InlineData("src/Foo/A.cs", "src/Foo/**", true)]
+    [InlineData("src/Foo/Deep/A.cs", "src/Foo", true)]
+    [InlineData("src/Foo/Deep/A.cs", "src/Foo/", true)]
+    [InlineData("src/FooBar/A.cs", "src/Foo", false)]
+    [InlineData("src/Foo/Deep/A.cs", "src/Foo/*.cs", false)]
+    [InlineData("src/Foo/A.cs", "src/Foo/*.cs", true)]
+    [InlineData("tests/x/y.golden", "**/*.golden", true)]
+    [InlineData("y.golden", "**/*.golden", true)]
+    [InlineData("docs/a.md", "./docs/a.md", true)]
+    [InlineData("docs/a.md", "src/**", false)]
+    public void Globs_match_repository_relative_paths(string path, string pattern, bool expected) =>
+        Assert.Equal(expected, WriteScope.InScope(path, [pattern]));
+
+    [Fact]
+    public void Changes_include_new_modified_deleted_renamed_and_further_edits_to_dirty_files()
+    {
+        var dir = Directory.CreateTempSubdirectory("lw-scope").FullName;
+        try
+        {
+            void Git(params string[] a)
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var x in new[] { "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t" }.Concat(a)) psi.ArgumentList.Add(x);
+                using var p = System.Diagnostics.Process.Start(psi)!;
+                p.WaitForExit();
+                Assert.Equal(0, p.ExitCode);
+            }
+            Git("init", "-q");
+            foreach (var f in new[] { "keep.txt", "edit.txt", "gone.txt", "move.txt", "dirty.txt" }) File.WriteAllText(Path.Combine(dir, f), f);
+            Git("add", "-A");
+            Git("commit", "-qm", "init");
+            File.WriteAllText(Path.Combine(dir, "dirty.txt"), "dirty before the run");
+            Directory.CreateDirectory(Path.Combine(dir, ".lean-worker", "runs"));
+
+            var before = WriteScope.Take(dir, Path.Combine(dir, ".lean-worker"))!;
+            File.WriteAllText(Path.Combine(dir, "edit.txt"), "changed");
+            File.Delete(Path.Combine(dir, "gone.txt"));
+            Git("mv", "move.txt", "moved.txt");
+            File.WriteAllText(Path.Combine(dir, "dirty.txt"), "edited again by the worker");
+            Directory.CreateDirectory(Path.Combine(dir, "new"));
+            File.WriteAllText(Path.Combine(dir, "new", "file.txt"), "x");
+            File.WriteAllText(Path.Combine(dir, ".lean-worker", "runs", "log.txt"), "the launcher's own files");
+            var after = WriteScope.Take(dir, Path.Combine(dir, ".lean-worker"))!;
+
+            Assert.Equal(["dirty.txt", "edit.txt", "gone.txt", "move.txt", "moved.txt", "new/file.txt"], WriteScope.Changed(before, after));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void Outside_a_git_tree_there_is_no_snapshot()
+    {
+        var dir = Directory.CreateTempSubdirectory("lw-nogit").FullName;
+        try { Assert.Null(WriteScope.Take(dir)); }
+        finally { Directory.Delete(dir, true); }
+    }
+}

@@ -159,6 +159,11 @@ quota:    5h 10% -> 12%, weekly 41% -> 42%
 - `note: no price for <model>` means the price book lacks the model; propose a line for
   `.lean-worker/prices.json`.
 - If the summary reports permission denials, add the needed commands to the profile's `allowedTools`.
+- Give a task that edits code its write scope: `--write-scope "src/Foo/**"` (repeatable, relative to the git
+  root; a directory covers everything under it) or the profile key `writeScope`. The launcher compares the
+  working tree before and after the run: the `files:` line counts what changed, `summary.json` lists it
+  (`changed_files`, `out_of_scope`), and a `WARNING` names the files outside the scope. The status does not
+  change: check those files (revert or accept them) before you accept the run. A continuation keeps the scope.
 
 ## Review run (optional)
 

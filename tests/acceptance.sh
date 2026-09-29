@@ -107,6 +107,14 @@ if [ $claude_only = 0 ] || [ -n "${LW_OPENCODE_MODEL:-}" ]; then
     printf 'Run the bash command `ls | head -1` exactly as written. Whatever happens, then run the bash command `ls`. Then reply DONE.\n' > "$rr/inbox/deny.md"
     run --runtime opencode --task "$rr/inbox/deny.md" --model "${LW_OPENCODE_MODEL:-zai-coding-plan/glm-5.3}" --no-project-notes --tools Bash --allow 'Bash(ls:*)' --max-budget-usd 0.05
     check "success with DONE, one denial counted" '[ "$(field .status)" = success ] && grep -q DONE "$last/report.md" && [ "$(field .permission_denials)" -ge 1 ]'
+
+    echo "== 12. a write outside the task's write scope is reported"
+    saved="$cwd" cwd="$scratch/repo"
+    mkdir -p "$cwd/src" "$cwd/docs" && (cd "$cwd" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm init --allow-empty)
+    printf 'Use the Write tool to create src/a.txt containing "a" and docs/b.txt containing "b". Then reply DONE.\n' > "$rr/inbox/scope.md"
+    run --runtime opencode --task "$rr/inbox/scope.md" --model "${LW_OPENCODE_MODEL:-zai-coding-plan/glm-5.3}" --no-project-notes --tools Write --write-scope 'src/**' --max-budget-usd 0.05
+    check "two files changed, docs/b.txt outside the scope, warned" '[ "$(field ".changed_files | length")" = 2 ] && [ "$(field ".out_of_scope | join(\",\")")" = docs/b.txt ] && grep -q "outside the write scope: docs/b.txt" "$scratch/out.txt"'
+    cwd="$saved"
 fi
 
 echo "== 5. cost of a manual session"
