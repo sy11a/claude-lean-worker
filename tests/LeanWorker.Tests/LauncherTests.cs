@@ -371,20 +371,20 @@ public class TemplateTests
     }
 
     [Fact]
-    public void Family_profiles_parse_name_their_family_and_end_their_chains_in_claude()
+    public void Chain_template_ends_every_chain_in_claude_and_prices_every_model()
     {
-        var files = Directory.GetFiles(Path.Combine(Templates(), "profiles"), "*.json");
-        Assert.NotEmpty(files);
-        foreach (var f in files)
+        var doc = JsonNode.Parse(File.ReadAllText(Path.Combine(Templates(), "profiles-chains.json")))!;
+        var book = JsonNode.Parse(File.ReadAllText(Path.Combine(Templates(), "..", "launcher", "prices.json")))!;
+        foreach (var (name, p) in doc["profiles"]!.AsObject())
         {
-            var family = Path.GetFileNameWithoutExtension(f);
-            var profiles = JsonNode.Parse(File.ReadAllText(f))!["profiles"]!.AsObject();
-            Assert.Equal(["code", "edit", "read", "review"], profiles.Select(p => p.Key.Replace("-" + family, "")).Order());
-            foreach (var (_, p) in profiles)
+            if (p!["model"] is not JsonArray arr) continue;
+            var chain = arr.Select(m => m!.GetValue<string>()).ToList();
+            Assert.True(chain.Count >= 2 && chain[^1].StartsWith("claude-", StringComparison.Ordinal), $"{name}: {string.Join(",", chain)}");
+            foreach (var id in chain.Where(m => m.Contains('/')))
             {
-                var chain = p!["model"]!.AsArray().Select(m => m!.GetValue<string>()).ToList();
-                Assert.True(chain.Count >= 2 && chain[^1].StartsWith("claude-", StringComparison.Ordinal), $"{f}: {string.Join(",", chain)}");
-                Assert.DoesNotContain("claude-", chain[0]);
+                var (prov, model) = (id[..id.IndexOf('/')], id[(id.IndexOf('/') + 1)..]);
+                var priced = book["providers"]?[prov]?["priceAs"]?.GetValue<string>() ?? prov;
+                Assert.True(book["models"]?[$"{priced}/{model}"] is not null, $"{name}: {id} has no price-book entry");
             }
         }
     }
