@@ -117,6 +117,10 @@ if [ $claude_only = 0 ] || [ -n "${LW_OPENCODE_MODEL:-}" ]; then
     cwd="$saved"
 fi
 
+echo "== 13. the ledger's schema and stats --json"
+cmd stats --json
+check "rows carry schema_version 1 and stats --json has groups" '[ "$(tail -1 "$rr/runs.jsonl" | jq .schema_version)" = 1 ] && jq -e ".schema_version == 1 and (.groups | length) > 0" "$scratch/out.txt" >/dev/null'
+
 echo "== 5. cost of a manual session"
 cmd cost --claude "$run1/stream.jsonl"
 check "cost reads a Claude stream/transcript" 'grep -q "at list price" "$scratch/out.txt"'

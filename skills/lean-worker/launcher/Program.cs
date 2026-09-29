@@ -49,6 +49,7 @@ internal static class Launcher
     private static readonly string[] Efforts = ["low", "medium", "high", "xhigh", "max"];
     private static readonly string[] PermissionModes = ["acceptEdits", "dontAsk", "plan", "manual", "auto", "bypassPermissions"];
     private const string ContinuationHeading = "## Continuation (lean-worker)";
+    public const int RunSchemaVersion = 1;
 
     public static int Run(Options o)
     {
@@ -272,6 +273,8 @@ internal static class Launcher
 
         var summary = new JsonObject
         {
+            // Bumped when a field changes meaning or is removed; added fields keep the version. Rows without it are 0.
+            ["schema_version"] = RunSchemaVersion,
             ["timestamp"] = started.ToString("o"),
             ["name"] = name,
             ["run_dir"] = runDir,
@@ -300,6 +303,7 @@ internal static class Launcher
             ["wrapped_up"] = meter.WrappedUp,
             ["hook_checks"] = hookChecks,
             ["continued_from"] = o.ContinueFrom is null ? null : Path.GetFullPath(o.ContinueFrom),
+            ["escalate_to"] = next,
             ["tokens"] = tok,
             ["context_first_call"] = first,
             ["context_peak"] = peak,

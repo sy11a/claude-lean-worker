@@ -476,15 +476,24 @@ Exit codes: `0` success, `1` the worker reported an error or failed, `2` the lau
 - budget, wrap-up threshold, whether it fired, and hook checks;
 - the input / cache-write / cache-read / output / thinking token split;
 - first-call and peak context;
-- quota before and after the run, and the percentage it used, on a subscription with a quota adapter.
+- quota before and after the run, and the percentage it used, on a subscription with a quota adapter;
+- the next model the run offered (`escalate_to`), if any;
+- the write scope, the files the run changed in the git working tree, and those outside the scope.
+
+Each row carries `schema_version` (currently 1). Fields may be added within a version. The version goes up
+when a field changes meaning or is removed. Rows written before the field existed count as version 0: the same
+fields, without `schema_version`, `escalate_to` and the write-scope fields. Other tools read the ledger
+directly, or its aggregate with `stats --json`: per profile and model, runs, successes, wrap-ups,
+escalations, cost, cost per success and quota % per run.
 
 ## Verification status
 
 Checked on 2026-09-29 with Claude Code 2.1.284, opencode 1.18.32 and .NET SDK 10, on Linux (Fedora).
 
 **Tested on Linux:**
-- the launcher builds with no warnings; 18 unit tests (`dotnet test tests/LeanWorker.Tests`): pricing,
-  stream parsing for Anthropic, z.ai and opencode, the meter, quota parsing, and the key-routing guard;
+- the launcher builds with no warnings; 37 unit tests (`dotnet test tests/LeanWorker.Tests`): pricing,
+  stream parsing for Anthropic, z.ai and opencode (including permission denials and cut-off sessions), the
+  meter, quota parsing, the key-routing guard, the write scope, the profile templates and `stats`;
 - `tests/acceptance.sh`, 20 checks with real workers (about $0.65 list price in total, most of it one
   deliberately overpriced case), all passing:
   - wrap-up, continuation and continuation of a continuation on Claude Haiku (subscription login);
@@ -505,7 +514,9 @@ From earlier checks, still valid: lean mode keeps the project's CLAUDE.md, AGENT
 **Not yet tested:**
 - MiniMax quota in the CN region (the international endpoint was verified on 2026-09-29);
 - a `--bare` run with an API key;
-- DeepSeek, Qwen and MiniMax end to end (their prices and endpoints ship from their documentation);
+- DeepSeek and Qwen end to end (their prices and endpoints ship from their documentation). MiniMax-M3 on the
+  Token Plan runs as a worker in both runtimes (2026-09-29/30; acceptance cases 11 and 12 with
+  `LW_OPENCODE_MODEL=minimax-coding-plan/MiniMax-M3`);
 - Windows, including `claude`/`opencode` installed as npm `.cmd` shims, which the launcher starts
   through `cmd.exe`, and the hook command's quoting there;
 - `install.ps1` under Windows PowerShell 5.1. It is written ASCII-only and without 7-only syntax.
