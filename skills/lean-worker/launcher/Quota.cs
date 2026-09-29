@@ -117,9 +117,12 @@ internal static class Quota
         {
             var model = Json.Str(m, "model_name") ?? "?";
             var prefix = model == "general" ? "" : model + "-";
-            // Round to the nearest hour: MiniMax reports a 5 h window a little short at times (4 h 59 m).
+            // The text models' interval is the plan's 5-hour block. Blocks are clock-aligned and cut at the UTC day
+            // boundary, so one can be shorter (22:00-02:00 CEST was 4 h); it is still the "5h" window.
+            // Other families are named by their block length (video: 24h).
             var hours = (long)Math.Round((Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000.0);
-            windows.Add(Window($"{prefix}{(hours > 0 ? $"{hours}h" : "interval")}", m, "current_interval", "end_time"));
+            var interval = model == "general" ? "5h" : hours > 0 ? $"{hours}h" : "interval";
+            windows.Add(Window($"{prefix}{interval}", m, "current_interval", "end_time"));
             windows.Add(Window($"{prefix}weekly", m, "current_weekly", "weekly_end_time"));
         }
         if (windows.Count == 0) throw new LaunchException("MiniMax quota: no model_remains in response");
