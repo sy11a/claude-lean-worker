@@ -13,4 +13,14 @@
     <RootNamespace>LeanWorker</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="LeanWorker.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Next to the executable, where the launcher finds them through AppContext.BaseDirectory. -->
+    <None Include="prices.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="opencode-plugin.ts" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

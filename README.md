@@ -1,8 +1,10 @@
 # claude-lean-worker
 
-A Claude Code skill that runs one coding task in a separate, minimal-context worker
-(`claude -p --bare`). The orchestrating session gets back the worker's report together
-with its token usage and cost.
+A Claude Code skill that runs one coding task in a separate, minimal-context worker: Claude Code
+(`claude -p`) or opencode (`opencode run`), on Claude or on other providers' models (GLM, DeepSeek,
+Qwen, MiniMax). The orchestrating session gets back the worker's report together with its token
+usage and cost. Near its budget the worker writes a handoff instead of stopping blind, and a fresh
+worker can pick the task up from it.
 
 > **Quick install through your agent:** in a Claude Code session in your project, say
 > *"Install the lean-worker skill for this project, following
@@ -44,36 +46,47 @@ This is real output from a test run with `--no-bare`. A `--bare` run starts smal
     minimal profile from flags instead. See [Authentication and modes](#authentication-and-modes).
 - .NET SDK 8 or newer. The launcher targets `net8.0` with `RollForward=LatestMajor`, so it
   also runs on newer runtimes. It has no NuGet dependencies.
+- Linux, macOS or Windows. The installer is `install.sh` (bash; `jq` for the permission step) or
+  `install.ps1` (PowerShell).
+- Optional: [opencode](https://opencode.ai), for workers with `"runtime": "opencode"`.
 
 ## Setup after download
 
 ### 1. Run the installer (no agent involved)
 
-From the downloaded repository, in PowerShell:
+From the downloaded repository, on Linux or macOS:
+
+```bash
+./install.sh --project ~/src/my-product --smoke-test
+```
+
+On Windows, in PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -ProjectPath C:\src\my-product -SmokeTest
 ```
 
-The installer:
+Both installers do the same (flags: `--scope project` / `-Scope Project`, `--skip-permission` /
+`-SkipPermission`):
 
-1. **Checks prerequisites:** `claude` with `--bare`, a .NET SDK 8 or newer, and whether
-   `ANTHROPIC_API_KEY` is set. A missing key is a warning, not a failure.
-2. **Installs the skill** into `%USERPROFILE%\.claude\skills\lean-worker`. Use
-   `-Scope Project` to install into `<project>\.claude\skills` instead.
+1. **Checks prerequisites:** `claude` with `--bare`, a .NET SDK 8 or newer, whether
+   `ANTHROPIC_API_KEY` is set (a missing key is not a failure), and whether opencode is installed.
+2. **Installs the skill** into `~/.claude/skills/lean-worker` (Windows: `%USERPROFILE%\.claude\skills\lean-worker`).
+   The project scope installs into `<project>/.claude/skills` instead.
 3. **Builds the launcher once**, so the first worker starts immediately.
 4. **Prepares the project** when `-ProjectPath` is given:
-   - creates `.lean-worker\project.md` and `.lean-worker\profiles.json` from the templates.
+   - creates `.lean-worker/project.md` and `.lean-worker/profiles.json` from the templates.
      Files that already exist are never overwritten.
    - adds `.lean-worker/runs/`, `.lean-worker/inbox/` and `.lean-worker/runs.jsonl` to `.gitignore`.
-   - adds the allow rule `Bash(dotnet run --project:*)` to `<project>\.claude\settings.json`,
+   - adds the allow rule `Bash(dotnet run --project:*)` to `<project>/.claude/settings.json`,
      so the orchestrator can start workers without a permission prompt. The file is backed up
      first (`settings.json.bak-<stamp>`) and is re-serialised, so any formatting is not kept. Pass
-     `-SkipPermission` to leave it alone and add the rule yourself.
+     the skip flag to leave it alone and add the rule yourself.
 5. **Runs one tiny worker** when `-SmokeTest` is given. It uses Haiku, is read-only and has a
    budget of $0.10. The installer prints that worker's result block.
 
-The installer is safe to re-run: it updates the skill and leaves your project files alone.
+The installer is safe to re-run: it updates the skill and leaves your project files alone,
+including your price files (`.lean-worker/prices.json`, `~/.config/lean-worker/prices.json`).
 
 ### 2. Fill in the project notes and profiles
 
@@ -100,10 +113,16 @@ Then **read and edit both files by hand**. They are yours, and the skill never o
 
 The launcher picks the mode itself (`--mode auto`, the default). The mode is shown in every result block.
 
-| Your Claude Code login | Mode | What the worker runs |
+| Situation | Mode | What the worker runs |
 |---|---|---|
-| `ANTHROPIC_API_KEY` set, or `--claude-settings <file>` with an `apiKeyHelper` | **bare** | `claude -p --bare`: loads no CLAUDE.md, hooks, plugins, skills, auto-memory or MCP |
-| Subscription login: Pro, Max, Team, **Enterprise** | **lean** | `claude -p` with CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude/rules` excluded (`claudeMdExcludes`), auto memory off, your hooks off (organisation-managed hooks still run), skills disabled, and no MCP |
+| Subscription login (Pro, Max, Team, **Enterprise**), an API key with wrap-up on (the default), or another provider's model | **lean** | `claude -p --setting-sources ""` with CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude/rules` excluded (`claudeMdExcludes`), no user/project/local settings (so none of your hooks or plugins; organisation-managed settings and hooks still apply), auto memory off, skills disabled, and no MCP. The launcher's own wrap-up hook is injected through `--settings` |
+| `ANTHROPIC_API_KEY` (or `--claude-settings` with an `apiKeyHelper`) and `--wrap-up-at 0` | **bare** | `claude -p --bare`: loads no CLAUDE.md, hooks, plugins, skills, auto-memory or MCP. Bare mode skips every hook, so it has no wrap-up; the budget is still enforced |
+
+`--setting-sources ""` replaced the earlier `disableAllHooks` approach. Measured on a subscription
+login (Claude Code 2.1.284): the injected hook fires, the user's SessionStart hooks and plugins do
+not load (31 plugins → 2 built-in), and a one-call probe went from $0.0197 to $0.0043. Your user
+settings' `env` block (proxies, for example) is passed to the worker through its process environment,
+never written to the run directory; `--no-user-env` turns that off. `--keep-hooks` loads your settings, hooks and plugins as before.
 
 Nothing needs configuring for an Enterprise subscription. Stay logged in to `claude` as usual;
 the worker uses the same login.
@@ -203,6 +222,169 @@ official `ModelContextProtocol` C# SDK. It would expose `run_worker(task, profil
 
 This is not built. Use the Bash flow first and build the MCP server when a real need shows up.
 
+## Budget wrap-up and continuation
+
+A worker that simply hits its spending cap stops mid-task: the files it edited stay on disk, and
+nobody records what is done and what is left. The launcher prevents that:
+
+1. It **meters spend live**: every API call the worker streams is priced with the price book
+   (below), for Claude and for every other provider alike.
+2. Past **`wrapUpAt`** of the budget (default `0.8`; profile key or `--wrap-up-at`; `0` = off) it writes
+   `<run>/wrapup.json`. The worker's pre-tool hook (Claude Code: `LeanWorker hook`, injected through the
+   run's `--settings`; opencode: a plugin in the run's clean config) then denies every tool call with an
+   instruction to finish with a `HANDOFF` block: Done / Remaining / Files touched / State / Next step.
+3. At the **budget** the launcher stops the worker. This is the hard cap for every model; Claude Code's
+   own `--max-budget-usd` is passed as a second net only for Claude models, because it prices other
+   providers' models wrongly.
+4. The result shows `status: wrapped-up`, exit code `3`, and a `continue:` line. On the operator's go,
+   `--continue-from <run-dir>` (without `--task`) starts a **fresh** worker with the original task plus the
+   handoff, the previous run's profile and the full budget again. It does not resume the old session,
+   which would re-read the whole context. `--runtime` and `--model` can be overridden, so a task can move
+   to a cheaper model or to the other runtime. Continuing a continuation keeps the original task once.
+
+```
+status:   wrapped-up  (subtype=success, reason=completed, exit=0)
+cost:     $0.0126 (list-price equivalent; subscription, not billed)
+budget:   $0.03, wrap-up at $0.009 (triggered), 8 hook checks
+continue: --continue-from ".lean-worker/runs/20260929-180127-glob12" (fresh worker, original task + this handoff; ask the operator first)
+--- worker report ---
+HANDOFF
+- Done: Completed 5 Glob calls with patterns a*, b*, c*, d*, e*
+- Remaining: 7 more Glob calls needed with patterns f*, g*, h*, i*, j*, k*, l* in that order
+...
+```
+
+Limits:
+
+- The remaining share must cover one final report turn. At a very large context it might not, and the
+  budget then stops the run with no report (`status: budget-exceeded`). Lower `wrapUpAt` for that profile.
+- The meter sees an API call when the runtime streams it. Claude Code streams a call before its tool runs;
+  opencode reports a step when it finishes. Wrap-up can therefore fire one step late in opencode.
+- `hook checks` in the `budget:` line counts how often the hook ran. `0` with wrap-up on means the hook
+  never ran; the budget is still enforced.
+
+## Models, prices and subscriptions
+
+### Model ids and providers
+
+A model is `provider/model`, e.g. `zai-coding-plan/glm-5.3` or `deepseek/deepseek-v4-flash`; a bare id
+(`claude-sonnet-5-5`) is an Anthropic model. Provider ids follow opencode's. In the claude runtime a
+non-Anthropic model runs through the provider's Anthropic-compatible endpoint (`anthropicBaseUrl` in the
+price book) with the key from the provider's `keyEnv` variable, or from opencode's stored login
+(`opencode auth login`). Keys go to the worker through its environment and are never written to disk.
+The shipped endpoint verified end to end is z.ai's (`zai-coding-plan`); the others are from the providers'
+documentation.
+
+### The price book
+
+`<skill-dir>/launcher/prices.json` ships list prices (USD per million tokens, from models.dev, checked by
+hand, with the date). Two files are merged over it, later ones winning: `~/.config/lean-worker/prices.json`
+(personal) and `.lean-worker/prices.json` (the project's, shared by every tool; `--prices <file>` replaces it
+for one run). Add a model or change a price there; no rebuild is needed, and the installer never touches
+these files. A project file travels with the repository, so it cannot say where keys go: a provider's
+`anthropicBaseUrl`, `keyEnv`, `quota.url` and `quota.adapter` are read only from the shipped and the
+personal file, and the result block names any the project file tried to set.
+
+```json
+{
+  "asOf": "2026-10-15",
+  "unknownModel": "dearest",
+  "rates": { "USD": 1, "CNY": 0.14 },
+  "providers": {
+    "my-plan": { "billing": "subscription", "priceAs": "zai", "keyEnv": "MY_PLAN_KEY",
+                 "anthropicBaseUrl": "https://example.com/anthropic" }
+  },
+  "models": {
+    "zai/glm-6": { "input": 1.5, "output": 5, "cacheRead": 0.3, "cacheWrite": 0 },
+    "alibaba/qwen-x": { "input": 3, "output": 12, "currency": "CNY",
+                        "above": { "tokens": 200000, "input": 6, "output": 24 } }
+  }
+}
+```
+
+- A model id matches the longest key it starts with, so dated ids (`claude-haiku-4-5-20251001`) match.
+- `cacheRead` and `cacheWrite` default to the input price, `cacheWrite1h` to twice the input price.
+  Reasoning tokens are billed as output. `above` is a price tier for calls whose context exceeds `tokens`.
+- `unknownModel`: `dearest` (price it as the most expensive model: a wrap-up that comes early, never late),
+  `error` (refuse to launch), or a model key to price it as. The result block names the unpriced model.
+- `LeanWorker prices` lists the merged book, its sources and each entry's date, and flags entries older
+  than 90 days.
+
+### Billing: metered or subscription
+
+Each provider has a `billing`: `metered` (tokens cost money), `subscription` (a plan with usage limits,
+such as z.ai's GLM Coding Plan), or `auto` (Anthropic: a subscription when the worker uses your
+Claude Code login, metered with an API key). **Budgets are in list price either way.** On a subscription
+the `cost:` line is the list-price equivalent, not a bill; it is the number to compare tasks, profiles and
+models by, and the one the wrap-up uses. `priceAs` prices a plan's models as the provider's metered ones
+(opencode and models.dev price coding plans at 0, which would make every budget infinite).
+
+### Quota and model chains
+
+Providers with a `quota` adapter report how much of the plan is used. z.ai's GLM Coding Plan is supported
+(`GET https://api.z.ai/api/monitor/usage/quota/limit`): a 5-hour and a weekly token window, and the
+monthly MCP tool calls.
+
+```
+$ dotnet run --project <skill-dir>/launcher -c Release -- quota
+zai-coding-plan (max): 5h 9% (resets in 1h43m), weekly 89% (resets in 2d2h), mcp-monthly 0% (resets in 28d17h)
+  mcp-monthly: 0 of 4000 calls
+  headroom for workers: no (zai-coding-plan weekly 89% >= 85%)
+```
+
+A profile's `model` can be a **chain**, e.g. `["zai-coding-plan/glm-5.3", "deepseek/deepseek-v4-flash",
+"claude-sonnet-5-5"]`. The launcher takes the first model with headroom: a subscription model while every
+window is under its `maxPercent` (shipped: 5h 90%, weekly 85%), a metered model always. If the quota
+cannot be read, the model counts as available and the result says so. A subscription run records the
+quota before and after it (`quota:` line; `quota_used_pct` in `runs.jsonl`). When a run fails on a model
+that has a next one in the chain, the result offers an `escalate:` line; like a continuation, it runs
+only on the operator's go.
+
+For a status line or a quick check, `quota --max-age 60` reuses a reading younger than 60 seconds
+(cached in `~/.cache/lean-worker/`). A Claude Code status line can call it; in opencode, a custom command
+can run it.
+
+### Using cheaper models without changing the flow
+
+The goal is a lower cost per finished task, with the same commands, the same result block and the same
+single "go" from the operator:
+
+- The orchestrator stays where it is. Only workers change model, and they are where most tokens go.
+- Mechanical task classes with a checkable done-criterion (`read`, `edit`, `code`) get a chain that
+  starts with the cheapest capable model: a subscription while it has quota, then cheap metered models,
+  then Claude. `review` should use a different model family from the one that wrote the change.
+- `LeanWorker stats` shows, per profile and model, the success rate, the cost per successful task and the
+  quota used per run. Move a model down the chain when its cost per success is worse than the next
+  model's, even if it is cheaper per token.
+
+### Pricing a manual session
+
+`cost --claude <session-id|file.jsonl>` prices a Claude Code transcript (`~/.claude/projects/...`); add
+`--provider <name>` for a session that ran on another provider's endpoint. `cost --opencode <session-id>`
+prices an opencode session from its database. Both use the same price book and show each model's billing.
+
+## The opencode runtime
+
+`"runtime": "opencode"` (or `--runtime opencode`) starts `opencode run --format json` instead of `claude -p`.
+The worker is kept as lean as in Claude Code:
+
+- It runs on a **clean config home** (`XDG_CONFIG_HOME` set to the run directory): no global instructions,
+  plugins, skills or MCP servers. Logins stay where they are. `OPENCODE_DISABLE_PROJECT_CONFIG` and
+  `OPENCODE_DISABLE_CLAUDE_CODE` keep the project's AGENTS.md and CLAUDE.md out (`--keep-claude-md` keeps
+  them). The worker's shell commands get your own `XDG_CONFIG_HOME` back, so git and other tools behave
+  as usual.
+- A custom provider defined in your opencode config is carried into the worker's config (in memory; the
+  recorded `opencode-config.json` leaves it out, since it may hold a key).
+- Tools map from the profile's Claude Code names (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`,
+  `WebFetch`, `WebSearch`) to opencode permissions; every other tool is denied. `Bash` runs only the
+  `allowedTools` patterns (`Bash(git diff:*)` → `git diff*`); any other command is rejected, since
+  `opencode run` cannot ask.
+- `effort` does not apply; `variant` (profile key or `--variant`) selects an opencode model variant.
+- `--mcp-config` is claude-runtime only.
+
+An opencode orchestrator uses the launcher the same way: write the task, run the launcher from the
+project root, read only the result block. `.lean-worker/` is the same for both tools.
+
 ## Launcher reference
 
 Run from the project root (`.lean-worker/` is resolved relative to the current directory):
@@ -213,26 +395,36 @@ dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbo
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task <file>` | required | Task prompt, piped to the worker |
+| `--task <file>` | required, unless `--continue-from` | Task prompt, piped to the worker |
+| `--continue-from <run-dir>` | none | Fresh worker on a stopped run: its original task plus its report as the handoff. Profile defaults to that run's |
 | `--profile <name>` | `defaultProfile` in profiles.json | Named profile |
 | `--system <file>` | none | Per-task notes, appended after `project.md` |
-| `--model`, `--effort`, `--tools A,B`, `--allow <pattern>` (repeatable), `--mcp-config`, `--max-budget-usd`, `--permission-mode` | from profile | Per-run overrides |
+| `--runtime claude\|opencode` | `claude` | Worker runtime (profile key `runtime`) |
+| `--model <id>` | from profile | `provider/model`, or a bare Anthropic id. Overrides the profile's model or chain |
+| `--effort`, `--variant`, `--tools A,B`, `--allow <pattern>` (repeatable), `--mcp-config`, `--max-budget-usd`, `--permission-mode` | from profile | Per-run overrides |
+| `--wrap-up-at <share>` | `0.8` | Share of the budget after which tools are blocked and the worker hands off; `0` = off (profile key `wrapUpAt`) |
+| `--prices <file>` | `<runs-root>/prices.json` | Price file merged over the shipped and personal ones (profile key `prices`) |
 | `--timeout-minutes <n>` | `60` | Kill the worker after n minutes |
 | `--no-project-notes` | off | Do not send `project.md` |
 | `--replace-system-prompt` | off | Replace Claude Code's system prompt instead of appending to it |
-| `--mode auto\|bare\|lean` | `auto` | `bare` if an API key or `--claude-settings` is present, otherwise `lean` (subscription) |
-| `--keep-claude-md` | off | Lean mode: do not exclude CLAUDE.md / AGENTS.md / `.claude/rules` |
+| `--mode auto\|bare\|lean` | `auto` | Claude runtime: `lean`, or `bare` when an API key is set and wrap-up is off |
+| `--keep-claude-md` | off | Do not exclude CLAUDE.md / AGENTS.md / `.claude/rules` (opencode: keep the project config) |
 | `--keep-memory` | off | Lean mode: keep auto memory |
 | `--cache-ttl 5m\|1h\|default` | `5m` | Prompt-cache lifetime for the worker (profile key `cacheTtl`). See below |
-| `--keep-hooks` | off | Lean mode: keep your user/project/plugin hooks (or `"keepHooks": true` in a profile). Managed hooks always run |
-| `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper`. In lean mode it is merged with the exclusions |
+| `--keep-hooks` | off | Lean mode: load your user/project settings, hooks and plugins (or `"keepHooks": true` in a profile). Managed hooks always run |
+| `--no-user-env` | off | Lean mode: do not carry your user settings' `env` block into the worker |
+| `--claude-settings <file>` | none | Passed to `claude` as `--settings`. It counts as an API key only if it has an `apiKeyHelper`. In lean mode it is merged with the exclusions |
 | `--no-bare` | off | Alias for `--mode lean` |
 
 A setting comes from the command-line option if one is given, otherwise from the profile,
 otherwise from the built-in default. The worker always runs with `--strict-mcp-config`, so it
 gets no MCP server unless the profile or `--mcp-config` names one.
 
-Exit codes: `0` success, `1` the worker reported an error, `2` the launcher failed.
+Other commands (same `dotnet run ... --` prefix): `quota`, `cost`, `stats`, `prices` (see above), and
+`hook`, which the launcher installs into workers itself.
+
+Exit codes: `0` success, `1` the worker reported an error or failed, `2` the launcher failed,
+`3` the worker wrapped up near its budget and left a handoff.
 
 ## Cost notes from real runs
 
@@ -248,6 +440,14 @@ Exit codes: `0` success, `1` the worker reported an error, `2` the launcher fail
   WebFetch summaries cost another 16%. Give exact URLs and split research by source.
 - **Keep the orchestrator short-lived.** Its long history is re-read on every one of its turns, so it is
   easily the most expensive part. Let a `review` worker check a worker's result, and read only verdicts.
+- **Other providers' runtimes misprice.** Claude Code prices a GLM model through z.ai's endpoint at its
+  own guess ($0.0200 where the list price was $0.0074 in one run), and opencode prices coding-plan models
+  at 0. The launcher prices every call with the price book; the runtime's figure is shown only when it
+  differs by more than 5%.
+- **Claude Code's stream undercounts output.** Its `assistant` events repeat the output count from the
+  start of a message; only the `message_delta` of `--include-partial-messages` carries the final one.
+  The launcher reads that, which matched Claude Code's own cost to the cent. z.ai's endpoint sends
+  every count in the delta and zeros at the start; the meter keeps the largest value of each field.
 
 ## What is recorded
 
@@ -256,38 +456,51 @@ Exit codes: `0` success, `1` the worker reported an error, `2` the launcher fail
 - `task.md`
 - `system.md`, the notes the worker actually received
 - `command.txt`
-- `stream.jsonl`, the raw `stream-json` output
+- `stream.jsonl`, the worker's JSON output (Claude Code's token-by-token deltas are left out)
+- `settings.json` (claude runtime, lean mode) or `opencode-config.json` (opencode runtime)
+- `wrapup.json` when the wrap-up fired, and `hook.log`, one line per hook check
 - `summary.json`
 - `report.md`
 
 `.lean-worker/runs.jsonl` gets one JSON line per run, recording:
 
-- profile, model and effort;
+- profile, runtime, provider, model (and why it was picked from the chain), effort and billing;
 - status, turns, and API calls (deduplicated by message id);
-- cost;
+- cost as metered with the price book, and the cost the runtime reported, if any;
+- budget, wrap-up threshold, whether it fired, and hook checks;
 - the input / cache-write / cache-read / output / thinking token split;
-- first-call and peak context.
+- first-call and peak context;
+- quota before and after the run, and the percentage it used, on a subscription with a quota adapter.
 
 ## Verification status
 
-Checked on 2026-09-29 with Claude Code 2.1.284 and .NET SDK 10.
+Checked on 2026-09-29 with Claude Code 2.1.284, opencode 1.18.32 and .NET SDK 10, on Linux (Fedora).
 
 **Tested on Linux:**
-- the launcher builds with no warnings;
-- real worker runs with `--no-bare` (subscription auth), end to end, driven by a profile and project notes;
-- the refusal when no API key is set in `--bare` mode;
-- the refusal when an unknown profile is named;
-- `install.ps1` under PowerShell 7.6: a full install into a sandbox home and project, the smoke
-  test, and a re-run that duplicates nothing.
+- the launcher builds with no warnings; 18 unit tests (`dotnet test tests/LeanWorker.Tests`): pricing,
+  stream parsing for Anthropic, z.ai and opencode, the meter, quota parsing, and the key-routing guard;
+- `tests/acceptance.sh`, 20 checks with real workers (about $0.65 list price in total, most of it one
+  deliberately overpriced case), all passing:
+  - wrap-up, continuation and continuation of a continuation on Claude Haiku (subscription login);
+  - the meter matching Claude Code's own cost within 5% (to the cent in practice);
+  - `--keep-hooks` loading a project hook, and the default keeping it out;
+  - wrap-up off, a price change without a rebuild, and the unknown-model policy;
+  - GLM-5.3 on z.ai's GLM Coding Plan, in the claude runtime (Anthropic-compatible endpoint) and in
+    the opencode runtime, including wrap-up and a cross-runtime continuation;
+  - the quota command and the chain fallback over a quota threshold;
+  - run and scratch paths containing a space;
+- `install.sh` and `install.ps1` (PowerShell 7) into a sandbox home and project, and a re-run that
+  duplicates nothing;
+- the hook's overhead: about 60 ms per tool call.
 
-- lean mode with a subscription login, checked with codeword probes (these figures are from before auto memory was turned off by default): the worker does not see the
-  project's CLAUDE.md, AGENTS.md or `.claude/rules` (9.1k first call), and does see them with
-  `--keep-claude-md` (13.4k). It also covers the AGENTS.md fallback, which loads when CLAUDE.md is
-  excluded alone.
+From earlier checks, still valid: lean mode keeps the project's CLAUDE.md, AGENTS.md and
+`.claude/rules` out of the worker (codeword probes), and `--keep-claude-md` brings them back.
 
 **Not yet tested:**
 - a `--bare` run with an API key;
-- Windows, including `claude` installed as an npm `.cmd` shim, which the launcher starts through `cmd.exe`;
+- DeepSeek, Qwen and MiniMax end to end (their prices and endpoints ship from their documentation);
+- Windows, including `claude`/`opencode` installed as npm `.cmd` shims, which the launcher starts
+  through `cmd.exe`, and the hook command's quoting there;
 - `install.ps1` under Windows PowerShell 5.1. It is written ASCII-only and without 7-only syntax.
 
 ## License

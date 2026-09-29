@@ -16,9 +16,9 @@ https://github.com/sy11a/claude-lean-worker/blob/main/INSTALL.md
 
 Summary of what I expect:
 1. Clone the repo into a temp folder (not into this project). If GitHub is blocked, stop and ask me for a ZIP.
-2. Check prerequisites: `claude --help` lists --bare, .NET SDK 8+, PowerShell, and how Claude Code is authenticated. I am on an Enterprise subscription login (no API key needed; workers run in lean mode). Never print any key.
+2. Check prerequisites: `claude --help` lists --bare, .NET SDK 8+, bash (Linux/macOS) or PowerShell (Windows), optionally opencode, and how Claude Code is authenticated. I am on an Enterprise subscription login (no API key needed; workers run in lean mode). Never print any key.
 3. Ask me, in one message: install for my user or for this project only, and may you add the permission rule to .claude/settings.json.
-4. Run install.ps1 with -ProjectPath set to this project root and the flags matching my answers. If ExecutionPolicy is blocked, stop and tell me.
+4. Run install.sh (Linux/macOS) or install.ps1 (Windows) for this project root with the flags matching my answers. If ExecutionPolicy is blocked, stop and tell me.
 5. Fill .lean-worker/project.md and .lean-worker/profiles.json from this repository (build files, README, CLAUDE.md, CI). Delete the template block, replace every {...} placeholder, keep project.md under ~2k tokens, and ask me about anything you cannot determine (max 5 questions).
 6. Ask before the smoke test (one Haiku call, $0.10 budget), then run it and report the mode, status, cost (list-price equivalent; on my subscription it counts against plan usage) and first-call context.
 7. Delete the temp clone, commit nothing, and tell me what was installed, what I must review by hand, and that I need to restart Claude Code before /lean-worker works.
