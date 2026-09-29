@@ -51,7 +51,9 @@ internal sealed class Options
                                      subscription quota of every provider with a quota adapter (e.g. zai-coding-plan)
           cost --claude <session-id|file.jsonl> [--provider <name>] | --opencode <session-id>
                                      price a manual session with prices.json
-          stats [--since <yyyy-mm-dd>]  runs per profile and model: success rate, cost per success, quota used
+          stats [--since <yyyy-mm-dd>] [--json]
+                                     runs per profile and model: success rate, wrap-ups, escalations, cost per success,
+                                     quota used; --json for other tools (schema_version as in runs.jsonl)
           prices                     the merged price book: sources and each entry's date
         """;
 

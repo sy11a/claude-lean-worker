@@ -165,27 +165,58 @@ internal static class Commands
         return calls;
     }
 
+    /// <summary>One line of <c>stats</c>: the runs of one profile on one model.</summary>
+    internal sealed record StatsRow(string Profile, string Model, int Runs, int Success, int WrappedUp, int Escalations,
+                                    decimal CostUsd, decimal? CostPerSuccessUsd, decimal? QuotaPctPerRun);
+
+    internal static List<StatsRow> StatsRows(IEnumerable<JsonObject> runs) =>
+        runs.GroupBy(r => (Json.Str(r, "profile") ?? "-", $"{Json.Str(r, "provider") ?? "anthropic"}/{Json.Str(r, "model")}"))
+            .OrderBy(g => g.Key.Item1, StringComparer.Ordinal).ThenBy(g => g.Key.Item2, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var ok = g.Count(r => Json.Str(r, "status") == "success");
+                var cost = g.Sum(r => Json.Dec(r, "total_cost_usd") ?? 0);
+                var quota = g.Select(r => r["quota_used_pct"] as JsonObject).OfType<JsonObject>()
+                             .Select(q => q.Select(kv => Json.Dec(q, kv.Key) ?? 0).DefaultIfEmpty(0).Max()).ToList();
+                return new StatsRow(g.Key.Item1, g.Key.Item2, g.Count(), ok, g.Count(r => Json.Str(r, "status") == "wrapped-up"),
+                    g.Count(r => Json.Str(r, "escalate_to") is not null), cost, ok > 0 ? cost / ok : null,
+                    quota.Count > 0 ? quota.Average() : null);
+            }).ToList();
+
     public static int Stats(string[] args)
     {
-        var f = Flags(args);
+        var f = Flags(args, "--json");
         var path = Path.Combine(f.GetValueOrDefault("--runs-root") ?? ".lean-worker", "runs.jsonl");
         if (!File.Exists(path)) throw new LaunchException($"no runs recorded yet ({path})");
         var since = f.GetValueOrDefault("--since") is { } s ? DateTimeOffset.Parse(s, Ic) : DateTimeOffset.MinValue;
         var runs = File.ReadLines(path).Select(Json.TryParseObject).OfType<JsonObject>()
             .Where(r => Json.Str(r, "timestamp") is { } t && DateTimeOffset.Parse(t, Ic) >= since).ToList();
-        Console.Out.WriteLine($"{"profile",-10} {"model",-34} {"runs",4} {"ok",4} {"wrap",4} {"cost",9} {"$/success",9} {"quota%/run",10}");
-        foreach (var g in runs.GroupBy(r => (Json.Str(r, "profile") ?? "-", $"{Json.Str(r, "provider") ?? "anthropic"}/{Json.Str(r, "model")}"))
-                              .OrderBy(g => g.Key.Item1))
+        var rows = StatsRows(runs);
+        if (f.ContainsKey("--json"))
         {
-            var ok = g.Count(r => Json.Str(r, "status") == "success");
-            var wrap = g.Count(r => Json.Str(r, "status") == "wrapped-up");
-            var cost = g.Sum(r => Json.Dec(r, "total_cost_usd") ?? 0);
-            var quota = g.Select(r => (r["quota_used_pct"] as JsonObject)?.Select(kv => Json.Dec(r["quota_used_pct"] as JsonObject, kv.Key) ?? 0).DefaultIfEmpty(0).Max())
-                         .Where(x => x is not null).Select(x => x!.Value).ToList();
-            Console.Out.WriteLine($"{g.Key.Item1,-10} {g.Key.Item2,-34} {g.Count(),4} {ok,4} {wrap,4} {("$" + cost.ToString("0.000", Ic)),9} " +
-                                  $"{(ok > 0 ? "$" + (cost / ok).ToString("0.000", Ic) : "-"),9} {(quota.Count > 0 ? quota.Average().ToString("0.0", Ic) : "-"),10}");
+            var doc = new JsonObject
+            {
+                ["schema_version"] = Launcher.RunSchemaVersion,
+                ["runs_file"] = Path.GetFullPath(path),
+                ["since"] = since == DateTimeOffset.MinValue ? null : since.ToString("o"),
+                ["cost_basis"] = "list price; list-price equivalent for subscriptions",
+                ["groups"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject
+                {
+                    ["profile"] = r.Profile, ["model"] = r.Model, ["runs"] = r.Runs, ["success"] = r.Success,
+                    ["wrapped_up"] = r.WrappedUp, ["escalations"] = r.Escalations,
+                    ["cost_usd"] = decimal.Round(r.CostUsd, 6),
+                    ["cost_per_success_usd"] = r.CostPerSuccessUsd is { } c ? decimal.Round(c, 6) : null,
+                    ["quota_pct_per_run"] = r.QuotaPctPerRun is { } q ? decimal.Round(q, 2) : null,
+                }).ToArray()),
+            };
+            Console.Out.WriteLine(doc.ToJsonString(Json.Indented));
+            return 0;
         }
-        Console.Out.WriteLine("cost = list price (list-price equivalent for subscriptions); quota%/run = largest window increase per run.");
+        Console.Out.WriteLine($"{"profile",-16} {"model",-34} {"runs",4} {"ok",4} {"wrap",4} {"esc",4} {"cost",9} {"$/success",9} {"quota%/run",10}");
+        foreach (var r in rows)
+            Console.Out.WriteLine($"{r.Profile,-16} {r.Model,-34} {r.Runs,4} {r.Success,4} {r.WrappedUp,4} {r.Escalations,4} {("$" + r.CostUsd.ToString("0.000", Ic)),9} " +
+                                  $"{(r.CostPerSuccessUsd is { } c ? "$" + c.ToString("0.000", Ic) : "-"),9} {(r.QuotaPctPerRun is { } q ? q.ToString("0.0", Ic) : "-"),10}");
+        Console.Out.WriteLine("cost = list price (list-price equivalent for subscriptions); esc = runs that offered the next model; quota%/run = largest window increase per run.");
         return 0;
     }
 
