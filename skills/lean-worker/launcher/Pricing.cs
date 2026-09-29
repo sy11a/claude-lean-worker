@@ -38,6 +38,9 @@ internal sealed class Provider(string name, JsonObject? o)
     public JsonObject? Quota => Raw["quota"] as JsonObject;
 }
 
+/// <summary>What a worker needs because of the model, whichever provider serves it (price book key "modelTraits").</summary>
+internal sealed record ModelTraits(string Key, List<string> AllowedTools, string? Note);
+
 internal sealed class PriceBook
 {
     private readonly JsonObject _doc;
@@ -117,6 +120,18 @@ internal sealed class PriceBook
                                             && model.StartsWith(kv.Key[prefix.Length..], StringComparison.OrdinalIgnoreCase));
         var best = candidates.OrderByDescending(kv => kv.Key.Length).FirstOrDefault();
         return best.Value is JsonObject o ? Parse(best.Key, o) : null;
+    }
+
+    /// <summary>
+    /// The traits of a model id without its provider: the longest "modelTraits" key the id starts with (case
+    /// insensitive), so one entry covers the model from every provider that serves it.
+    /// </summary>
+    public ModelTraits? Traits(string model)
+    {
+        if (_doc["modelTraits"] is not JsonObject all) return null;
+        var best = all.Where(kv => !kv.Key.StartsWith('_') && model.StartsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
+                      .OrderByDescending(kv => kv.Key.Length).FirstOrDefault();
+        return best.Value is JsonObject o ? new ModelTraits(best.Key, Json.StrList(o, "allowedTools") ?? [], Json.Str(o, "note")) : null;
     }
 
     /// <summary>Applies the unknownModel policy: "dearest", "error", or a model key to price as.</summary>

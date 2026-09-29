@@ -46,5 +46,13 @@
     "minimax/MiniMax-M3": { "input": 0.3, "output": 1.2, "cacheRead": 0.06,
                             "above": { "tokens": 200000, "input": 0.6, "output": 2.4, "cacheRead": 0.12 } },
     "minimax/MiniMax-M2.7": { "input": 0.3, "output": 1.2, "cacheRead": 0.06, "cacheWrite": 0.375 }
+  },
+  "modelTraits": {
+    "_comment": "What a worker needs because of the model, whichever provider serves it. Keys are model ids without the provider; a model id matches the longest key it starts with. allowedTools are added to a Bash profile's; note is printed in the result. Detail: ../models.md.",
+    "MiniMax-M3": {
+      "allowedTools": ["Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(sed -n:*)", "Bash(jq:*)", "Bash(echo:*)",
+                       "Bash(ls:*)", "Bash(pwd)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git log:*)"],
+      "note": "chains shell commands and has edited files outside its task's scope: give code tasks --write-scope"
+    }
   }
 }

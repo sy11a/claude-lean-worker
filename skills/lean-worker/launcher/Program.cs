@@ -91,8 +91,10 @@ internal static class Launcher
 
         var prices = PriceBook.Load(runsRoot, o.PricesFile ?? Json.Str(profile, "prices"));
         var notes = new List<string>(prices.Warnings);
-        var runtimeName = o.Runtime ?? Json.Str(profile, "runtime") ?? "claude";
-        var runtime = Runtimes.Get(runtimeName);
+        // An explicit runtime holds for every model in the chain; otherwise each model gets the runtime its provider allows.
+        var explicitRuntime = o.Runtime ?? Json.Str(profile, "runtime");
+        if (explicitRuntime is not null) Runtimes.Get(explicitRuntime); // validates the name before any quota read
+        var runtimeName = explicitRuntime ?? "claude";
         var chain = o.Model is not null ? [o.Model]
             : profile?["model"] is JsonArray arr ? arr.Select(x => x!.GetValue<string>()).ToList()
             : [Json.Str(profile, "model") ?? "claude-sonnet-5"];
@@ -136,6 +138,7 @@ internal static class Launcher
             var (prov, mdl) = PriceBook.Split(chain[i]);
             var info = prices.Provider(prov);
             (provider, model, pickReason, quotaBefore) = (prov, mdl, chain.Count <= 1 ? "" : i == 0 ? "first in chain" : "next in chain", null);
+            runtimeName = explicitRuntime ?? DefaultRuntime(info);
             if (Billing(info, runtimeName, hasKey) != "subscription" || info.Quota is null) break;
             try
             {
@@ -153,6 +156,18 @@ internal static class Launcher
             }
         }
         var providerInfo = prices.Provider(provider);
+        var runtime = Runtimes.Get(runtimeName);
+        if (explicitRuntime is null && runtimeName != "claude") notes.Add($"runtime {runtimeName}: provider {provider} has no Anthropic-compatible endpoint in the price book");
+        // What the model needs, whichever provider serves it: extra pre-approved commands and a note.
+        var traits = prices.Traits(model);
+        if (traits is not null)
+        {
+            var added = traits.AllowedTools.Where(t => !allowed.Contains(t)).ToList();
+            if (added.Count > 0 && tools.Contains("Bash", StringComparer.OrdinalIgnoreCase)) allowed = [.. allowed, .. added];
+            else added.Clear();
+            notes.Add($"model traits {traits.Key}: {(added.Count > 0 ? $"+{added.Count} allowed command pattern(s)" : "no allowlist change")}" +
+                      (traits.Note is { Length: > 0 } tn ? $"; {tn}" : ""));
+        }
         prices.Resolve(provider, model, out var priceNote); // fails early under unknownModel: "error"
         if (priceNote is not null) notes.Add(priceNote);
 
@@ -304,6 +319,7 @@ internal static class Launcher
             ["hook_checks"] = hookChecks,
             ["continued_from"] = o.ContinueFrom is null ? null : Path.GetFullPath(o.ContinueFrom),
             ["escalate_to"] = next,
+            ["model_traits"] = traits?.Key,
             ["tokens"] = tok,
             ["context_first_call"] = first,
             ["context_peak"] = peak,
@@ -473,6 +489,9 @@ internal static class Launcher
         lock (stream) closed = true;
         return (timedOut ? -1 : p.ExitCode, timedOut, capKilled);
     }
+
+    /// <summary>The claude runtime reaches Anthropic and any provider with an Anthropic-compatible endpoint; others need opencode.</summary>
+    internal static string DefaultRuntime(Provider p) => p.Name == "anthropic" || p.AnthropicBaseUrl is not null ? "claude" : "opencode";
 
     public static string? FindOnPath(string command)
     {
