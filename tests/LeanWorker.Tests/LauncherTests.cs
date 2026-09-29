@@ -256,10 +256,10 @@ public class MinimaxQuotaTests
     }
 
     [Fact]
-    public void A_window_a_little_short_of_five_hours_is_still_5h()
+    public void The_text_models_block_is_5h_even_when_cut_at_the_day_boundary()
     {
         var q = Quota.ParseMinimax("m", """
-            {"model_remains":[{"model_name":"general","start_time":1790694000000,"end_time":1790711940000,
+            {"model_remains":[{"model_name":"general","start_time":1790712000000,"end_time":1790726400000,
               "current_interval_remaining_percent":100,"current_weekly_remaining_percent":100}],"base_resp":{"status_code":0}}
             """);
         Assert.Equal("5h", q.Windows[0].Name);
