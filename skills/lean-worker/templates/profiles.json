@@ -1,0 +1,40 @@
+{
+  "defaultProfile": "code",
+  "profiles": {
+    "read": {
+      "model": "claude-haiku-4-5",
+      "effort": "low",
+      "tools": ["Read", "Glob", "Grep"],
+      "allowedTools": [],
+      "maxBudgetUsd": 0.5
+    },
+    "edit": {
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "tools": ["Read", "Edit", "Glob", "Grep"],
+      "allowedTools": [],
+      "maxBudgetUsd": 1
+    },
+    "code": {
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
+      "allowedTools": ["Bash(<build command>:*)", "Bash(<test command>:*)", "Bash(git diff:*)", "Bash(git status:*)"],
+      "maxBudgetUsd": 3
+    },
+    "research": {
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "tools": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+      "allowedTools": [],
+      "maxBudgetUsd": 1
+    },
+    "review": {
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "tools": ["Read", "Glob", "Grep", "Bash"],
+      "allowedTools": ["Bash(git diff:*)", "Bash(git log:*)"],
+      "maxBudgetUsd": 1
+    }
+  }
+}

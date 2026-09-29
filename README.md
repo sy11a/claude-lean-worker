@@ -8,31 +8,33 @@ with its token usage and cost.
 
 An in-session subagent inherits the project's CLAUDE.md, the skill listing, every MCP
 server and every tool schema. That is often 40-60k tokens before the subagent does anything,
-and all of it is re-read on every API call the subagent makes. A `--bare` worker loads only
-what you pass it explicitly: a short system note, the task, and the tools the task needs.
+and every API call it makes re-reads all of it. A `--bare` worker loads only what you pass
+it: the project notes, the task, and the tools the task needs.
 
 Every run is recorded, so you can see what each delegated task actually cost:
 
 ```
 LEAN-WORKER RESULT
+run:      .lean-worker/runs/20260929-133150-add-greeting
 status:   success  (subtype=success, reason=completed, exit=0)
-work:     3 turns, 3 API calls, 0m15s
-cost:     $0.0226 (list price reported by Claude Code)
-tokens:   input 25 | cache write 7,113 | cache read 37,625 | output 923 (thinking 607)
-context:  first call 14,277 | peak 15,358
+model:    claude-haiku-4-5, effort low, profile code, bare=False
+work:     3 turns, 3 API calls, 0m13s
+cost:     $0.0105 (list price reported by Claude Code)
+tokens:   input 25 | cache write 971 | cache read 43,573 | output 830 (thinking 501)
+context:  first call 14,283 | peak 15,253
 --- worker report ---
 ...
 ```
 
-(This is the real output of the test run below, which used `-NoBare`. A `--bare` run
-starts smaller.)
+This is real output from a test run with `--no-bare`. A `--bare` run starts smaller.
 
 ## Requirements
 
-- Claude Code with `--bare` in `claude --help`, authenticated by **API key**. `--bare`
-  reads only `ANTHROPIC_API_KEY` (or an `apiKeyHelper` passed via `--settings`) and never
+- Claude Code with `--bare` in `claude --help`, authenticated by **API key**. `--bare` reads
+  only `ANTHROPIC_API_KEY` (or an `apiKeyHelper` passed via `--settings`); it never reads
   OAuth or the keychain.
-- Windows PowerShell 5.1 or PowerShell 7+. On macOS and Linux, PowerShell 7 (`pwsh`).
+- .NET SDK 8 or newer. The launcher targets `net8.0` with `RollForward=LatestMajor`, so it
+  also runs on newer runtimes. It has no NuGet dependencies.
 
 ## Install
 
@@ -45,44 +47,52 @@ Copy-Item -Recurse .\skills\lean-worker "$env:USERPROFILE\.claude\skills\lean-wo
 Copy-Item -Recurse .\skills\lean-worker .\.claude\skills\lean-worker
 ```
 
-Add `.lean-worker/` to the project's `.gitignore`. Run directories contain the full
-worker transcript.
+## Configure it for your project (stack-neutral)
+
+The skill knows nothing about your stack. Two files in your project configure it. The
+orchestrating session drafts them from `templates/`, and you edit them by hand:
+
+- **`.lean-worker/project.md`**: notes every worker receives. Stack, layout, build, test and lint
+  commands, conventions, prohibitions, and where to look. Keep it short (target under 2k tokens),
+  because it is paid on every worker API call.
+- **`.lean-worker/profiles.json`**: named profiles (`read`, `edit`, `code`, `research`, `review`
+  in the template). Each one sets the model, effort, tools, pre-approved commands and budget.
+  Replace the `<build command>` and `<test command>` placeholders with your own, and add
+  profiles for your task classes.
+
+Add `.lean-worker/runs/` and `.lean-worker/inbox/` to `.gitignore`. Run directories contain the
+full worker transcript.
 
 ## Use
 
 In the orchestrating session, ask for it directly ("use lean-worker to implement …"), or
-let Claude pick it for a well-scoped task. The skill tells the orchestrator how to:
+let Claude pick it for a well-scoped task. The skill tells the orchestrator to:
 
-1. Write `.lean-worker/inbox/<name>/task.md` (goal, start-here paths, a done-criterion you
-   can check with a command, boundaries, report format) and optionally a short `system.md`.
-   Templates are in `skills/lean-worker/templates/`.
-2. Run `scripts/Invoke-LeanWorker.ps1` in the background with a model, effort, tool and
-   permission profile that fits the task class.
+1. Write `.lean-worker/inbox/<name>/task.md`: the goal, the paths to start from, a
+   done-criterion that can be checked with a command, the boundaries, and the report format.
+2. Run the launcher in the background with a profile.
 3. Read only the printed result block, then verify the done-criterion itself.
 
-You can run the launcher by hand too:
+By hand, from the project root:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\skills\lean-worker\scripts\Invoke-LeanWorker.ps1 `
-  -TaskFile .lean-worker\inbox\fix-parser\task.md `
-  -SystemFile .lean-worker\inbox\fix-parser\system.md `
-  -Model claude-sonnet-5 -Effort medium `
-  -AllowedTools 'Bash(dotnet build:*)','Bash(dotnet test:*)'
+```
+dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbox/fix-parser/task.md --profile code
 ```
 
-| Parameter | Default | Meaning |
+| Option | Default | Meaning |
 |---|---|---|
-| `-TaskFile` | required | Task prompt, piped to the worker |
-| `-SystemFile` | none | Appended to Claude Code's system prompt (`-ReplaceSystemPrompt` to replace it) |
-| `-Model` | `claude-sonnet-5` | Worker model |
-| `-Effort` | `medium` | `low` … `max` |
-| `-Tools` | `Read,Edit,Write,Glob,Grep,Bash` | Built-in tools available to the worker |
-| `-AllowedTools` | none | Pre-approved tool patterns, e.g. `'Bash(dotnet test:*)'` |
-| `-McpConfig` | none | MCP servers for this run only (always `--strict-mcp-config`) |
-| `-MaxBudgetUsd` | `2` | Spend cap for the run |
-| `-PermissionMode` | `acceptEdits` | Claude Code permission mode |
-| `-RunsRoot` | `.lean-worker` | Where runs and `runs.jsonl` go |
-| `-NoBare` | off | Same lean profile without `--bare` (e.g. no API key) |
+| `--task <file>` | required | Task prompt, piped to the worker |
+| `--profile <name>` | `defaultProfile` in profiles.json | Named profile |
+| `--system <file>` | none | Per-task notes, appended after `project.md` |
+| `--model`, `--effort`, `--tools A,B`, `--allow <pattern>` (repeatable), `--mcp-config`, `--max-budget-usd`, `--permission-mode` | from profile | Per-run overrides |
+| `--timeout-minutes <n>` | `60` | Kill the worker after n minutes |
+| `--no-project-notes` | off | Do not send `project.md` |
+| `--replace-system-prompt` | off | Replace Claude Code's system prompt instead of appending to it |
+| `--no-bare` | off | Same lean profile without `--bare`, e.g. when there is no API key |
+
+A setting comes from the command-line option if one is given, otherwise from the profile,
+otherwise from the built-in default. The worker always runs with `--strict-mcp-config`, so it
+gets no MCP server unless the profile or `--mcp-config` names one.
 
 Exit codes: `0` success, `1` the worker reported an error, `2` the launcher failed.
 
@@ -90,31 +100,34 @@ Exit codes: `0` success, `1` the worker reported an error, `2` the launcher fail
 
 `.lean-worker/runs/<stamp>-<name>/` holds:
 
-- `task.md`, `system.md`
+- `task.md`
+- `system.md`, the notes the worker actually received
 - `command.txt`
-- `stream.jsonl` (raw `stream-json` output)
+- `stream.jsonl`, the raw `stream-json` output
 - `summary.json`
 - `report.md`
 
-`.lean-worker/runs.jsonl` gets one JSON line per run. It records model, effort, status,
-turns, API calls (deduplicated by message id), cost, the input / cache-write / cache-read /
-output / thinking token split, first-call context and peak context. This is enough to
-compare the cost of task classes and profiles over time.
+`.lean-worker/runs.jsonl` gets one JSON line per run, recording:
+
+- profile, model and effort;
+- status, turns, and API calls (deduplicated by message id);
+- cost;
+- the input / cache-write / cache-read / output / thinking token split;
+- first-call and peak context.
 
 ## Verification status
 
-What has been checked, and where. The date is 2026-09-29, with Claude Code 2.1.284.
+Checked on 2026-09-29 with Claude Code 2.1.284 and .NET SDK 10.
 
-- **Tested:** PowerShell 7.6 on Linux:
-  - a real worker run with `-NoBare` (subscription auth), end to end;
-  - the missing-API-key refusal in `--bare` mode.
-- **Not yet tested:**
-  - a `--bare` run with an API key;
-  - Windows PowerShell 5.1;
-  - Windows itself.
+**Tested on Linux:**
+- the launcher builds with no warnings;
+- real worker runs with `--no-bare` (subscription auth), end to end, driven by a profile and project notes;
+- the refusal when no API key is set in `--bare` mode;
+- the refusal when an unknown profile is named.
 
-The script avoids PowerShell 7-only syntax and non-ASCII characters so that it can run on 5.1.
-Please open an issue if something breaks there.
+**Not yet tested:**
+- a `--bare` run with an API key;
+- Windows, including `claude` installed as an npm `.cmd` shim, which the launcher starts through `cmd.exe`.
 
 ## License
 
