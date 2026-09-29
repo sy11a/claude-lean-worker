@@ -80,10 +80,11 @@ internal static class Program
         if (o.SystemFile is not null && !File.Exists(o.SystemFile)) throw new LaunchException($"system file not found: {o.SystemFile}");
         if (mcpConfig is not null && !File.Exists(mcpConfig)) throw new LaunchException($"MCP config not found: {mcpConfig}");
         var claude = FindOnPath("claude") ?? throw new LaunchException("'claude' is not on PATH.");
-        if (!o.NoBare && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
+        if (o.ClaudeSettings is not null && !File.Exists(o.ClaudeSettings)) throw new LaunchException($"settings file not found: {o.ClaudeSettings}");
+        if (!o.NoBare && o.ClaudeSettings is null && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
         {
             throw new LaunchException("ANTHROPIC_API_KEY is not set. --bare reads only the API key (never OAuth/keychain). " +
-                                      "Set the key, or pass --no-bare to run the same lean profile without --bare.");
+                                      "Set the key, pass --claude-settings with an apiKeyHelper, or pass --no-bare to run without --bare.");
         }
 
         var taskPath = Path.GetFullPath(o.TaskFile);
@@ -113,6 +114,7 @@ internal static class Program
         if (runSystem is not null) a.AddRange([o.ReplaceSystemPrompt ? "--system-prompt-file" : "--append-system-prompt-file", runSystem]);
         a.AddRange(["--tools", string.Join(",", tools)]);
         if (allowed.Count > 0) { a.Add("--allowedTools"); a.AddRange(allowed); }
+        if (o.ClaudeSettings is not null) a.AddRange(["--settings", Path.GetFullPath(o.ClaudeSettings)]);
         a.Add("--strict-mcp-config");
         if (mcpConfig is not null) a.AddRange(["--mcp-config", Path.GetFullPath(mcpConfig)]);
         a.AddRange(["--permission-mode", permissionMode,
@@ -323,6 +325,7 @@ internal sealed class Options
           --max-budget-usd <n>       spend cap for the run
           --permission-mode <mode>   acceptEdits | dontAsk | plan | manual | auto | bypassPermissions
           --runs-root <dir>          default .lean-worker
+          --claude-settings <file>   passed to claude as --settings (e.g. an apiKeyHelper for --bare)
           --timeout-minutes <n>      kill the worker after n minutes (default 60)
           --report-max-chars <n>     truncate the printed report (default 6000)
           --no-project-notes         do not give the worker <runs-root>/project.md
@@ -330,7 +333,7 @@ internal sealed class Options
           --no-bare                  same lean profile without --bare (e.g. no API key)
         """;
 
-    public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot;
+    public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings;
     public List<string>? Tools;
     public List<string> AllowedTools = [];
     public decimal? MaxBudgetUsd;
@@ -357,6 +360,7 @@ internal sealed class Options
                 case "--max-budget-usd": o.MaxBudgetUsd = decimal.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--permission-mode": o.PermissionMode = Next(); break;
                 case "--runs-root": o.RunsRoot = Next(); break;
+                case "--claude-settings": o.ClaudeSettings = Next(); break;
                 case "--timeout-minutes": o.TimeoutMinutes = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--report-max-chars": o.ReportMaxChars = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--no-project-notes": o.NoProjectNotes = true; break;

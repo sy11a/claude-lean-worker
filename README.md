@@ -36,44 +36,109 @@ This is real output from a test run with `--no-bare`. A `--bare` run starts smal
 - .NET SDK 8 or newer. The launcher targets `net8.0` with `RollForward=LatestMajor`, so it
   also runs on newer runtimes. It has no NuGet dependencies.
 
-## Install
+## Setup after download
 
-Copy the skill folder into your user skills, or into one project's skills:
+### 1. Run the installer (no agent involved)
+
+From the downloaded repository, in PowerShell:
 
 ```powershell
-# user-wide
-Copy-Item -Recurse .\skills\lean-worker "$env:USERPROFILE\.claude\skills\lean-worker"
-# or per project
-Copy-Item -Recurse .\skills\lean-worker .\.claude\skills\lean-worker
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -ProjectPath C:\src\my-product -SmokeTest
 ```
 
-## Configure it for your project (stack-neutral)
+The installer:
 
-The skill knows nothing about your stack. Two files in your project configure it. The
-orchestrating session drafts them from `templates/`, and you edit them by hand:
+1. **Checks prerequisites:** `claude` with `--bare`, a .NET SDK 8 or newer, and whether
+   `ANTHROPIC_API_KEY` is set. A missing key is a warning, not a failure.
+2. **Installs the skill** into `%USERPROFILE%\.claude\skills\lean-worker`. Use
+   `-Scope Project` to install into `<project>\.claude\skills` instead.
+3. **Builds the launcher once**, so the first worker starts immediately.
+4. **Prepares the project** when `-ProjectPath` is given:
+   - creates `.lean-worker\project.md` and `.lean-worker\profiles.json` from the templates.
+     Files that already exist are never overwritten.
+   - adds `.lean-worker/runs/`, `.lean-worker/inbox/` and `.lean-worker/runs.jsonl` to `.gitignore`.
+   - adds the allow rule `Bash(dotnet run --project:*)` to `<project>\.claude\settings.json`,
+     so the orchestrator can start workers without a permission prompt. The file is backed up
+     first (`settings.json.bak-<stamp>`) and is re-serialised, so any formatting is not kept. Pass
+     `-SkipPermission` to leave it alone and add the rule yourself.
+5. **Runs one tiny worker** when `-SmokeTest` is given. It uses Haiku, is read-only and has a
+   budget of $0.10. The installer prints that worker's result block.
 
-- **`.lean-worker/project.md`**: notes every worker receives. Stack, layout, build, test and lint
-  commands, conventions, prohibitions, and where to look. Keep it short (target under 2k tokens),
-  because it is paid on every worker API call.
-- **`.lean-worker/profiles.json`**: named profiles (`read`, `edit`, `code`, `research`, `review`
-  in the template). Each one sets the model, effort, tools, pre-approved commands and budget.
-  Replace the `<build command>` and `<test command>` placeholders with your own, and add
-  profiles for your task classes.
+The installer is safe to re-run: it updates the skill and leaves your project files alone.
 
-Add `.lean-worker/runs/` and `.lean-worker/inbox/` to `.gitignore`. Run directories contain the
-full worker transcript.
+### 2. Fill in the project notes and profiles
 
-## Use
+Restart Claude Code, or start a new session, so it picks up the skill. Then, in a session in
+your project:
 
-In the orchestrating session, ask for it directly ("use lean-worker to implement …"), or
-let Claude pick it for a well-scoped task. The skill tells the orchestrator to:
+```
+/lean-worker set up .lean-worker/project.md and profiles.json for this repository
+```
 
-1. Write `.lean-worker/inbox/<name>/task.md`: the goal, the paths to start from, a
-   done-criterion that can be checked with a command, the boundaries, and the report format.
-2. Run the launcher in the background with a profile.
-3. Read only the printed result block, then verify the done-criterion itself.
+The orchestrator reads the repository and asks you about anything it cannot see. It fills in:
 
-By hand, from the project root:
+- **`.lean-worker/project.md`**: the notes every worker receives. Stack, layout, build, test and
+  lint commands, conventions, prohibitions, and where to look. Keep it short (target under 2k
+  tokens), because it is paid for on every worker API call.
+- **`.lean-worker/profiles.json`**: named profiles (`read`, `edit`, `code`, `research`, `review`).
+  Each one sets the model, effort, tools, pre-approved commands and budget. The `<build command>`
+  and `<test command>` placeholders are replaced with your own commands, and you add profiles
+  for your own task classes.
+
+Then **read and edit both files by hand**. They are yours, and the skill never overwrites your edits.
+
+### 3. API key
+
+`--bare` reads only `ANTHROPIC_API_KEY`, or an `apiKeyHelper` in a settings file passed with
+`--claude-settings <file>`. It never uses OAuth or the keychain. Make sure the key is in the
+environment Claude Code runs in. For example, set it once for your user with
+`setx ANTHROPIC_API_KEY <key>` and open a new terminal.
+
+## How it fits your Claude Code flow
+
+The orchestrator starts the launcher with its normal Bash tool, in the background. When the
+worker finishes, Claude Code notifies the orchestrator, and the notification carries the
+launcher's output. The tokens and cost therefore land in the orchestrating session by
+themselves: nothing polls, and nobody has to open a separate log.
+
+```
+You:           /lean-worker Add retry with backoff to OrderClient.Send; done when the OrderClient tests pass
+Orchestrator:  writes .lean-worker/inbox/order-retry/task.md
+               Bash (background): dotnet run --project <skill-dir>/launcher -c Release -- --task ... --profile code
+               ... the worker runs; the orchestrator waits ...
+               <- completion notification with the launcher output:
+                  LEAN-WORKER RESULT
+                  status: success ...
+                  cost:   $0.3812
+                  tokens: input 210 | cache write 18,300 | cache read 351,000 | output 7,900
+                  context: first call 5,100 | peak 31,000
+                  --- worker report --- ...
+               Bash: <your test command>   <- checks the done-criterion itself
+Orchestrator -> you: "Done, tests green. Worker: 14 API calls, $0.38."
+```
+
+The orchestrator is told to read only the result block, and not the worker's transcript or the
+full diff. That keeps its own context, which it re-reads on every turn, small. Every run is also
+recorded as one line in `.lean-worker/runs.jsonl` (see below).
+
+**Later, optionally: an MCP tool.** The launcher can be wrapped in a .NET MCP server built with the
+official `ModelContextProtocol` C# SDK. It would expose `run_worker(task, profile)`,
+`worker_status(runId)` and `worker_costs(since)`.
+
+- **Gains:**
+  - structured JSON results instead of a text block;
+  - one tool to grant permission to;
+  - a spend summary in one call.
+- **Costs:**
+  - an MCP call blocks the orchestrator and has a timeout, so long tasks would need a start/status pair;
+  - one more server to register;
+  - its tool schemas enter the context.
+
+This is not built. Use the Bash flow first and build the MCP server when a real need shows up.
+
+## Launcher reference
+
+Run from the project root (`.lean-worker/` is resolved relative to the current directory):
 
 ```
 dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbox/fix-parser/task.md --profile code
@@ -88,6 +153,7 @@ dotnet run --project <skill-dir>/launcher -c Release -- --task .lean-worker/inbo
 | `--timeout-minutes <n>` | `60` | Kill the worker after n minutes |
 | `--no-project-notes` | off | Do not send `project.md` |
 | `--replace-system-prompt` | off | Replace Claude Code's system prompt instead of appending to it |
+| `--claude-settings <file>` | none | Passed to `claude` as `--settings`, e.g. a file with an `apiKeyHelper` |
 | `--no-bare` | off | Same lean profile without `--bare`, e.g. when there is no API key |
 
 A setting comes from the command-line option if one is given, otherwise from the profile,
@@ -123,11 +189,14 @@ Checked on 2026-09-29 with Claude Code 2.1.284 and .NET SDK 10.
 - the launcher builds with no warnings;
 - real worker runs with `--no-bare` (subscription auth), end to end, driven by a profile and project notes;
 - the refusal when no API key is set in `--bare` mode;
-- the refusal when an unknown profile is named.
+- the refusal when an unknown profile is named;
+- `install.ps1` under PowerShell 7.6: a full install into a sandbox home and project, the smoke
+  test, and a re-run that duplicates nothing.
 
 **Not yet tested:**
 - a `--bare` run with an API key;
-- Windows, including `claude` installed as an npm `.cmd` shim, which the launcher starts through `cmd.exe`.
+- Windows, including `claude` installed as an npm `.cmd` shim, which the launcher starts through `cmd.exe`;
+- `install.ps1` under Windows PowerShell 5.1. It is written ASCII-only and without 7-only syntax.
 
 ## License
 

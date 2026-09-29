@@ -26,6 +26,8 @@ shown when the skill loads. Below, `<skill-dir>` means that absolute path.
 ## 0. Project setup (once per project, then maintained)
 
 The skill knows nothing about the project's stack. Two files in the project configure it.
+If the user ran `install.ps1 -ProjectPath`, both already exist as templates. Fill them in;
+do not recreate them.
 Both are the user's files: propose content, let the user edit it, and never overwrite
 their edits.
 
