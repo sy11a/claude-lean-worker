@@ -321,9 +321,15 @@ models by, and the one the wrap-up uses. `priceAs` prices a plan's models as the
 
 ### Quota and model chains
 
-Providers with a `quota` adapter report how much of the plan is used. z.ai's GLM Coding Plan is supported
-(`GET https://api.z.ai/api/monitor/usage/quota/limit`): a 5-hour and a weekly token window, and the
-monthly MCP tool calls.
+Providers with a `quota` adapter report how much of the plan is used. Two are supported:
+
+- z.ai's GLM Coding Plan (`zai-coding-plan`, adapter `zai`; `GET https://api.z.ai/api/monitor/usage/quota/limit`):
+  a 5-hour and a weekly token window, and the monthly MCP tool calls.
+- MiniMax's Coding / Token Plan (`minimax-coding-plan`, adapter `minimax`;
+  `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains`): a 5-hour and a weekly window for the
+  text models, plus windows for other model families such as video (`video-24h`, `video-weekly`). MiniMax
+  reports what is left; the launcher shows what is used. A plan key works in one region only: set
+  `"region": "cn"` in the provider's `quota` block (personal price file) for `api.minimaxi.com`.
 
 ```
 $ dotnet run --project <skill-dir>/launcher -c Release -- quota
@@ -497,6 +503,7 @@ From earlier checks, still valid: lean mode keeps the project's CLAUDE.md, AGENT
 `.claude/rules` out of the worker (codeword probes), and `--keep-claude-md` brings them back.
 
 **Not yet tested:**
+- MiniMax quota in the CN region (the international endpoint was verified on 2026-09-29);
 - a `--bare` run with an API key;
 - DeepSeek, Qwen and MiniMax end to end (their prices and endpoints ship from their documentation);
 - Windows, including `claude`/`opencode` installed as npm `.cmd` shims, which the launcher starts

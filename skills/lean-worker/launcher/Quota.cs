@@ -60,7 +60,8 @@ internal static class Quota
         var reading = adapter switch
         {
             "zai" => ReadZai(p),
-            _ => throw new LaunchException($"unknown quota adapter '{adapter}' (supported: zai)"),
+            "minimax" => ReadMinimax(p),
+            _ => throw new LaunchException($"unknown quota adapter '{adapter}' (supported: zai, minimax)"),
         };
         Directory.CreateDirectory(Path.GetDirectoryName(cache)!);
         File.WriteAllText(cache, reading.ToJson().ToJsonString(Json.Indented), Json.Utf8);
@@ -85,6 +86,52 @@ internal static class Quota
     private static string CacheDir() =>
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? Path.Combine(x, "lean-worker")
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "lean-worker");
+
+    // GET /v1/api/openplatform/coding_plan/remains (verified 2026-09-29, international region). A plan key works in one
+    // region only: "region": "cn" in the provider's quota block uses api.minimaxi.com.
+    private static QuotaReading ReadMinimax(Provider p)
+    {
+        var host = Json.Str(p.Quota, "region") == "cn" ? "https://api.minimaxi.com" : "https://api.minimax.io";
+        var url = Json.Str(p.Quota, "url") ?? $"{host}/v1/api/openplatform/coding_plan/remains";
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Runtimes.ProviderKey(p));
+        using var res = http.Send(req);
+        var body = new StreamReader(res.Content.ReadAsStream()).ReadToEnd();
+        if (!res.IsSuccessStatusCode) throw new LaunchException($"MiniMax quota: HTTP {(int)res.StatusCode}");
+        return ParseMinimax(p.Name, body);
+    }
+
+    // One entry per model family: "general" (the text models workers use) and others such as "video". Each has an
+    // interval window (5 h for general) and a weekly window. MiniMax reports what is LEFT: *_remaining_percent, and
+    // the *_usage_count fields also count remaining requests. Windows are named by length; other models get a prefix.
+    internal static QuotaReading ParseMinimax(string provider, string body)
+    {
+        JsonObject doc;
+        try { doc = Json.ParseLenient(body).AsObject(); }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { throw new LaunchException("MiniMax quota: the response is not JSON"); }
+        if (doc["base_resp"] is JsonObject br && Json.Num(br["status_code"]) != 0)
+            throw new LaunchException($"MiniMax quota: {Json.Str(br, "status_msg") ?? "error"} ({Json.Num(br["status_code"])})");
+        var windows = new List<QuotaWindow>();
+        foreach (var m in (doc["model_remains"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var model = Json.Str(m, "model_name") ?? "?";
+            var prefix = model == "general" ? "" : model + "-";
+            var hours = (Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000;
+            windows.Add(Window($"{prefix}{(hours > 0 ? $"{hours}h" : "interval")}", m, "current_interval", "end_time"));
+            windows.Add(Window($"{prefix}weekly", m, "current_weekly", "weekly_end_time"));
+        }
+        if (windows.Count == 0) throw new LaunchException("MiniMax quota: no model_remains in response");
+        return new QuotaReading(provider, null, windows, DateTimeOffset.Now);
+
+        static QuotaWindow Window(string name, JsonObject m, string field, string endField)
+        {
+            var remaining = Json.Dec(m, $"{field}_remaining_percent") ?? 100;
+            var total = Json.Num(m[$"{field}_total_count"]);
+            DateTimeOffset? reset = m[endField] is JsonValue v && v.TryGetValue(out long ms) && ms > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime() : null;
+            return new QuotaWindow(name, 100 - remaining, reset, total > 0 ? $"{Json.Num(m[$"{field}_usage_count"])} of {total} requests left" : null);
+        }
+    }
 
     // GET /api/monitor/usage/quota/limit (verified 2026-09-29). TOKENS_LIMIT windows carry a used percentage;
     // unit 3 = hours, 5 = months, 6 = weeks (inferred from nextResetTime). TIME_LIMIT counts MCP tool calls.
