@@ -71,7 +71,10 @@ internal static class Program
         var budget = o.MaxBudgetUsd ?? Dec(profile, "maxBudgetUsd") ?? 2m;
         var permissionMode = o.PermissionMode ?? Str(profile, "permissionMode") ?? "acceptEdits";
         var mcpConfig = o.McpConfig ?? Str(profile, "mcpConfig");
-        var noHooks = o.NoHooks || (profile?["disableHooks"] is JsonValue dh && dh.TryGetValue(out bool dhb) && dhb);
+        // Lean mode turns off user, project and plugin hooks so personal integrations do not reach the worker.
+        // Managed (organisation) hooks cannot be disabled from here and keep running.
+        var keepHooks = o.KeepHooks || (profile?["keepHooks"] is JsonValue kh && kh.TryGetValue(out bool khb) && khb);
+        var noHooks = !keepHooks;
         if (!Efforts.Contains(effort)) throw new LaunchException($"invalid effort '{effort}'");
         if (!PermissionModes.Contains(permissionMode)) throw new LaunchException($"invalid permission mode '{permissionMode}'");
 
@@ -136,8 +139,8 @@ internal static class Program
                 settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
             }
             if (!o.KeepMemory) settings["autoMemoryEnabled"] = false;
-            // Hooks stay on unless asked: an organisation may rely on them (secret scanning, command guards).
             if (noHooks) settings["disableAllHooks"] = true;
+            settings["outputStyle"] = "default"; // a personal output style would otherwise shape the worker's prompt
             var settingsPath = Path.GetFullPath(Path.Combine(runDir, "settings.json"));
             File.WriteAllText(settingsPath, settings.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), Utf8);
             a.AddRange(["--settings", settingsPath, "--disable-slash-commands"]);
@@ -207,7 +210,7 @@ internal static class Program
             ["model"] = model,
             ["effort"] = effort,
             ["mode"] = mode,
-            ["hooks"] = mode == "bare" ? "off (bare)" : noHooks ? "off" : "on",
+            ["hooks"] = mode == "bare" ? "off (bare)" : noHooks ? "off (managed hooks still run)" : "on",
             ["status"] = status,
             ["subtype"] = result?["subtype"]?.GetValue<string>(),
             ["terminal_reason"] = result?["terminal_reason"]?.GetValue<string>(),
@@ -368,7 +371,8 @@ internal sealed class Options
           --no-bare                  alias for --mode lean
           --keep-claude-md           lean mode: do not exclude CLAUDE.md / AGENTS.md / .claude/rules
           --keep-memory              lean mode: keep auto memory (off by default)
-          --no-hooks                 lean mode: disableAllHooks (profile key "disableHooks": true); hooks stay on by default
+          --keep-hooks               lean mode: keep user/project/plugin hooks (off by default; profile key "keepHooks": true).
+                                     Managed (organisation) hooks always run.
         """;
 
     public string? TaskFile, Profile, SystemFile, Name, Model, Effort, McpConfig, PermissionMode, RunsRoot, ClaudeSettings;
@@ -376,7 +380,7 @@ internal sealed class Options
     public List<string> AllowedTools = [];
     public decimal? MaxBudgetUsd;
     public int TimeoutMinutes = 60, ReportMaxChars = 6000;
-    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, KeepMemory, NoHooks, Help;
+    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, KeepMemory, KeepHooks, Help;
     public string Mode = "auto";
 
     public static Options Parse(string[] args)
@@ -408,7 +412,8 @@ internal sealed class Options
                 case "--mode": o.Mode = Next(); break;
                 case "--keep-claude-md": o.KeepClaudeMd = true; break;
                 case "--keep-memory": o.KeepMemory = true; break;
-                case "--no-hooks": o.NoHooks = true; break;
+                case "--keep-hooks": o.KeepHooks = true; break;
+                case "--no-hooks": break; // hooks are off by default; accepted for compatibility
                 case "-h" or "--help": o.Help = true; break;
                 default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");
             }
