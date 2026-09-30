@@ -1,13 +1,13 @@
 ---
 name: lean-worker
-description: Delegate one well-scoped coding task from an orchestrating session to a separate minimal-context worker process (Claude Code `claude -p`, or opencode `opencode run`, on Claude or other providers such as GLM, DeepSeek, Qwen or MiniMax) and get back its report plus exact token usage and cost; near its budget the worker hands off instead of stopping blind, and a fresh worker can continue. Use when a task has a clear goal and a done-criterion you can check with a command (implement a change, write tests, a mechanical refactor, a focused investigation), and you want it done without loading this session's full project context, skills and MCP servers into the worker. Also use to set up or update the project's worker notes and profiles (.lean-worker/project.md, .lean-worker/profiles.json).
+description: Delegate a well-scoped coding task (implement, test, refactor, search, review) from an orchestrating Claude Code or opencode session to a minimal-context worker on a cheap model chain; get back its report, cost and quota use, with a handoff near the budget. Also sets up .lean-worker/project.md and profiles.json.
 ---
 
 # Lean worker
 
-You are the orchestrator. For a well-scoped task you do not do the work in this session and
-you do not use an in-session subagent. A subagent inherits the project's CLAUDE.md, the skill
-listing, every MCP server and every tool schema, which is often 40-60k tokens before it starts
+You are the orchestrator, in Claude Code or in opencode. For a well-scoped task you do not do the work in this session and
+you do not use an in-session subagent. A subagent inherits the project's CLAUDE.md or AGENTS.md,
+the skill listing, every MCP server and every tool schema, which is often 40-60k tokens before it starts
 and is re-read on every call. A lean worker loads nothing on its own. It gets only the
 project notes, the task and the tools you give it.
 
@@ -20,21 +20,25 @@ share of the budget (default 80%) every tool call is blocked, so the worker's la
 
 ## Prerequisites (check once per session)
 
-- `claude` is logged in. The launcher picks the mode itself: **lean** (the minimal profile built
-  from flags: no CLAUDE.md, AGENTS.md, rules, user settings, hooks, plugins, skills or MCP) on a
-  subscription login or a key, and **bare** (`claude --bare`) only with an API key and wrap-up off.
-  Do not ask the user for an API key when they are on a subscription.
-- For profiles with `"runtime": "opencode"`: `opencode` is on PATH and logged in to the profile's
-  provider. For another provider's model in the claude runtime: its key is in the provider's
-  `keyEnv` variable (see `prices.json`) or in opencode's login.
-- `claude` is on PATH, and `claude --help` lists `--bare`.
 - A .NET SDK 8 or newer (`dotnet --list-sdks`). The first run builds the launcher, which takes a
   few seconds; later runs reuse the build.
+- **Workers in the claude runtime** (Anthropic models, and other providers through their
+  Anthropic-compatible endpoints): `claude` is on PATH, logged in, and `claude --help` lists `--bare`.
+  The launcher picks the mode itself: **lean** (the minimal profile built from flags: no CLAUDE.md,
+  AGENTS.md, rules, user settings, hooks, plugins, skills or MCP) on a subscription login or a key, and
+  **bare** (`claude --bare`) only with an API key and wrap-up off. Do not ask the user for an API key
+  when they are on a subscription. Another provider's key is in its `keyEnv` variable (see `prices.json`)
+  or in opencode's login.
+- **Workers in the opencode runtime** (a provider without an Anthropic-compatible endpoint, or a profile
+  with `"runtime": "opencode"`): `opencode` is on PATH and logged in to the provider.
+- The orchestrator does not have to match the worker: a Claude Code session can run opencode workers and
+  the other way round.
 
 ## 0. Project setup (once per project, then maintained)
 
 The skill knows nothing about the project's stack. Two files in the project configure it.
-If the user ran `install.ps1 -ProjectPath`, both already exist as templates. Fill them in;
+If the user ran the installer with a project (`install.sh --project`, `install.ps1 -ProjectPath`),
+both already exist as templates. Fill them in;
 do not recreate them.
 Both are the user's files: propose content, let the user edit it, and never overwrite
 their edits.
@@ -104,8 +108,15 @@ says which model ran and why; do not pick the model yourself unless the user ask
 
 ## 3. Run it
 
-Run it with the shell tool **in the background**, because a worker can outlast the tool's
-timeout. Wait for the completion notification; do not poll.
+A worker can outlast the shell tool's timeout, so:
+
+- **Claude Code:** run it with the Bash tool **in the background** (`run_in_background`) and wait for the
+  completion notification; do not poll.
+- **opencode:** its bash tool has no background mode. Pass the tool's `timeout` (milliseconds) above
+  the worker's own limit, e.g. `4800000` for the default `--timeout-minutes 60` plus a margin.
+
+In both, the first launch may ask for permission; the installer pre-approves `dotnet run --project`
+(`.claude/settings.json`, `opencode.json`).
 
 ```
 dotnet run --project "<skill-dir>/launcher" -c Release -- --task ".lean-worker/inbox/<task-name>/task.md" --profile code
@@ -180,9 +191,10 @@ list findings with file:line".
 When the user asks what is left on a subscription, or how much something cost, run the launcher's
 other commands (same `dotnet run --project "<skill-dir>/launcher" -c Release --` prefix):
 
-- `quota`: the usage windows of every subscription with a quota adapter (z.ai GLM Coding Plan today).
+- `quota`: the usage windows of every subscription with a quota adapter (z.ai GLM Coding Plan, MiniMax Token Plan).
 - `cost --claude <session-id>` or `cost --opencode <session-id>`: a manual session priced with the book.
-- `stats [--since <date>]`: per profile and model, success rate, cost per success and quota used.
+- `stats [--since <date>] [--json]`: per profile and model, success rate, wrap-ups, escalations, cost per
+  success and quota used.
 - `prices`: the merged price book, with each entry's date.
 
 ## Records
