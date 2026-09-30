@@ -1,16 +1,22 @@
 <#
 .SYNOPSIS
-    Installs the lean-worker skill for Claude Code. Runs without any agent.
+    Installs the lean-worker skill for orchestrating sessions in Claude Code and/or opencode. Runs without any agent.
 
 .DESCRIPTION
-    1. Checks prerequisites: claude (with --bare), .NET SDK 8+, an API key, and (optional) opencode.
-    2. Copies skills/lean-worker to the user's skills folder (default) or to a project's .claude/skills.
+    1. Checks prerequisites: .NET SDK 8+, claude (with --bare) when Claude Code orchestrates, opencode when
+       opencode orchestrates, and an API key (optional).
+    2. Copies skills/lean-worker into each orchestrator's skill folder: ~/.claude/skills and ~/.config/opencode/skills
+       (default), or a project's .claude/skills and .opencode/skills (-Scope Project). -Orchestrator Claude,
+       Opencode or Both; the default is Both when opencode is on PATH, else Claude.
     3. Builds the launcher once, so the first worker run starts immediately.
     4. With -ProjectPath, prepares that project:
          - .lean-worker/project.md and profiles.json from the templates (existing files are never overwritten)
          - .gitignore entries for .lean-worker/runs/ and .lean-worker/inbox/
-         - an allow rule in <project>/.claude/settings.json so the orchestrator can start workers
-           without a permission prompt. The file is backed up first; use -SkipPermission to skip this step.
+         - an allow rule so the orchestrator can start workers without a permission prompt: in
+           <project>/.claude/settings.json (Claude Code) and <project>/opencode.json (opencode). The files are
+           backed up first; use -SkipPermission to skip this step.
+         - with -AddRule, the delegation rule (templates/orchestrator-rule.md) appended once to the instruction
+           file each orchestrator reads: CLAUDE.md (Claude Code), AGENTS.md (opencode).
     5. With -SmokeTest, runs one tiny read-only worker (Haiku, budget $0.10) and prints its result block.
 
     Safe to re-run: it updates the skill and leaves your project files alone, including
@@ -25,7 +31,9 @@
 param(
     [string] $ProjectPath,
     [ValidateSet('User', 'Project')] [string] $Scope = 'User',
+    [ValidateSet('Claude', 'Opencode', 'Both')] [string] $Orchestrator,
     [switch] $SkipPermission,
+    [switch] $AddRule,
     [switch] $SmokeTest
 )
 
@@ -41,6 +49,10 @@ $repoRoot = $PSScriptRoot
 $source = Join-Path $repoRoot 'skills/lean-worker'
 if (-not (Test-Path -LiteralPath (Join-Path $source 'SKILL.md'))) { Die "run this script from the downloaded repository (skills\lean-worker not found next to it)" }
 if ($Scope -eq 'Project' -and -not $ProjectPath) { Die "-Scope Project needs -ProjectPath" }
+if ($AddRule -and -not $ProjectPath) { Die "-AddRule needs -ProjectPath" }
+$opencode = Get-Command opencode -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $Orchestrator) { if ($opencode) { $Orchestrator = 'Both' } else { $Orchestrator = 'Claude' } }
+function Uses([string] $o) { return $Orchestrator -eq 'Both' -or $Orchestrator -eq $o }
 if ($ProjectPath) {
     if (-not (Test-Path -LiteralPath $ProjectPath -PathType Container)) { Die "project path not found: $ProjectPath" }
     $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
@@ -48,11 +60,14 @@ if ($ProjectPath) {
 
 # ---------- 1. prerequisites ----------
 Step 'Checking prerequisites'
+Ok "orchestrator: $Orchestrator"
 $claude = Get-Command claude -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $claude) { Die "'claude' (Claude Code) is not on PATH" }
-$help = (& $claude.Source --help 2>&1 | Out-String)
-if ($help -notmatch '--bare') { Die "this Claude Code version has no --bare; update Claude Code" }
-Ok ("claude: " + (& $claude.Source --version 2>&1 | Out-String).Trim())
+if ($claude) {
+    $help = (& $claude.Source --help 2>&1 | Out-String)
+    if ($help -notmatch '--bare') { Die "this Claude Code version has no --bare; update Claude Code" }
+    Ok ("claude: " + (& $claude.Source --version 2>&1 | Out-String).Trim())
+} elseif (Uses 'Claude') { Die "'claude' (Claude Code) is not on PATH" }
+else { Ok "no claude on PATH: workers can use only the opencode runtime" }
 
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $dotnet) { Die "'dotnet' is not on PATH; install the .NET SDK 8 or newer" }
@@ -61,46 +76,66 @@ $okSdk = $sdks | Where-Object { $_ -match '^(\d+)\.' -and [int]$Matches[1] -ge 8
 if (-not $okSdk) { Die ".NET SDK 8 or newer not found (dotnet --list-sdks: $($sdks -join '; '))" }
 Ok ("dotnet SDK: " + (($okSdk | ForEach-Object { ($_ -split ' ')[0] }) -join ', '))
 
-$opencode = Get-Command opencode -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($opencode) { Ok ("opencode: " + (& $opencode.Source --version 2>&1 | Out-String).Trim() + " (runtime ""opencode"" available)") }
+elseif (Uses 'Opencode') { Die "'opencode' is not on PATH" }
 else { Ok "no opencode on PATH: only the claude runtime is available (optional)" }
 
 if ([string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY)) {
     Ok "no ANTHROPIC_API_KEY: workers will run in lean mode on your Claude Code login (Pro/Max/Team/Enterprise subscription). Make sure 'claude' is logged in."
 } else { Ok "ANTHROPIC_API_KEY is set: workers use the key (lean mode with wrap-up; bare mode when wrap-up is off)" }
 
-# ---------- 2. copy the skill ----------
-Step 'Installing the skill'
+# ---------- 2. copy the skill, 3. build the launcher ----------
 $userHome = $env:USERPROFILE
 if (-not $userHome) { $userHome = $HOME }
-if ($Scope -eq 'User') { $skillsRoot = Join-Path $userHome '.claude/skills' }
-else { $skillsRoot = Join-Path $ProjectPath '.claude/skills' }
-$target = Join-Path $skillsRoot 'lean-worker'
-New-Item -ItemType Directory -Force -Path $target | Out-Null
-# Replace the skill's own files but keep a previous build (bin/obj) to save time.
-foreach ($item in @('SKILL.md', 'templates')) {
-    $from = Join-Path $source $item
-    $to = Join-Path $target $item
-    if (Test-Path -LiteralPath $from -PathType Container) {
-        if (Test-Path -LiteralPath $to) { Remove-Item -LiteralPath $to -Recurse -Force }
-        Copy-Item -LiteralPath $from -Destination $to -Recurse
-    } else { Copy-Item -LiteralPath $from -Destination $to -Force }
+$opencodeConfig = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'opencode' } else { Join-Path $userHome '.config/opencode' }
+$targets = @()
+if (Uses 'Claude') { $targets += if ($Scope -eq 'User') { Join-Path $userHome '.claude/skills/lean-worker' } else { Join-Path $ProjectPath '.claude/skills/lean-worker' } }
+if (Uses 'Opencode') { $targets += if ($Scope -eq 'User') { Join-Path $opencodeConfig 'skills/lean-worker' } else { Join-Path $ProjectPath '.opencode/skills/lean-worker' } }
+foreach ($target in $targets) {
+    Step "Installing the skill at $target"
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    # Replace the skill's own files but keep a previous build (bin/obj) to save time.
+    foreach ($item in @('SKILL.md', 'models.md', 'templates')) {
+        $from = Join-Path $source $item
+        $to = Join-Path $target $item
+        if (Test-Path -LiteralPath $from -PathType Container) {
+            if (Test-Path -LiteralPath $to) { Remove-Item -LiteralPath $to -Recurse -Force }
+            Copy-Item -LiteralPath $from -Destination $to -Recurse
+        } else { Copy-Item -LiteralPath $from -Destination $to -Force }
+    }
+    # The launcher's sources, price book and opencode plugin: every top-level file, replacing the old ones.
+    $launcherTarget = Join-Path $target 'launcher'
+    New-Item -ItemType Directory -Force -Path $launcherTarget | Out-Null
+    Get-ChildItem -LiteralPath $launcherTarget -File | Remove-Item -Force
+    Get-ChildItem -LiteralPath (Join-Path $source 'launcher') -File | Copy-Item -Destination $launcherTarget -Force
+    Ok "skill installed"
+    $buildOut = & $dotnet.Source build $launcherTarget -c Release -v q -nologo 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { Write-Host $buildOut; Die "launcher build failed" }
+    Ok "launcher built"
 }
-# The launcher's sources, price book and opencode plugin: every top-level file, replacing the old ones.
-$launcherTarget = Join-Path $target 'launcher'
-New-Item -ItemType Directory -Force -Path $launcherTarget | Out-Null
-Get-ChildItem -LiteralPath $launcherTarget -File | Remove-Item -Force
-Get-ChildItem -LiteralPath (Join-Path $source 'launcher') -File | Copy-Item -Destination $launcherTarget -Force
-Ok "skill installed at $target"
-
-# ---------- 3. build the launcher ----------
-Step 'Building the launcher'
-$launcher = Join-Path $target 'launcher'
-$buildOut = & $dotnet.Source build $launcher -c Release -v q -nologo 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0) { Write-Host $buildOut; Die "launcher build failed" }
-Ok "launcher built"
+$launcher = Join-Path $targets[0] 'launcher'
 $launcherFwd = $launcher -replace '\\', '/'
 $runCmd = "dotnet run --project `"$launcherFwd`" -c Release --"
+
+# Appends the delegation rule to an instruction file once; a symlinked file already covered is skipped.
+$ruleDone = @()
+function Add-RuleTo([string] $file) {
+    $real = $file
+    $item = Get-Item -LiteralPath $file -ErrorAction SilentlyContinue
+    if ($item -and $item.LinkType -eq 'SymbolicLink') {
+        $t = [string]($item.Target | Select-Object -First 1)
+        $real = if ([IO.Path]::IsPathRooted($t)) { $t } else { Join-Path (Split-Path -Parent $file) $t }
+    }
+    $real = [IO.Path]::GetFullPath($real)
+    $name = Split-Path -Leaf $file
+    if ($script:ruleDone -contains $real) { Ok "${name}: the rule is already in $(Split-Path -Leaf $real)"; return }
+    $script:ruleDone += $real
+    if ((Test-Path -LiteralPath $real) -and (Select-String -LiteralPath $real -SimpleMatch 'lean-worker:orchestrator-rule' -Quiet)) { Ok "${name}: delegation rule already present"; return }
+    $prefix = ''
+    if ((Test-Path -LiteralPath $real) -and ((Get-Item -LiteralPath $real).Length -gt 0)) { $prefix = [Environment]::NewLine }
+    [IO.File]::AppendAllText($real, $prefix + [IO.File]::ReadAllText((Join-Path $source 'templates/orchestrator-rule.md'), $utf8), $utf8)
+    Ok "${name}: delegation rule added"
+}
 
 # ---------- 4. prepare the project ----------
 if ($ProjectPath) {
@@ -127,7 +162,7 @@ if ($ProjectPath) {
         Ok (".gitignore: added " + ($add -join ', '))
     } else { Ok ".gitignore already covers .lean-worker" }
 
-    if (-not $SkipPermission) {
+    if (-not $SkipPermission -and (Uses 'Claude')) {
         $rule = 'Bash(dotnet run --project:*)'
         $claudeDir = Join-Path $ProjectPath '.claude'
         $settings = Join-Path $claudeDir 'settings.json'
@@ -152,9 +187,47 @@ if ($ProjectPath) {
             Ok "added permission rule to .claude\settings.json: $rule"
         }
     }
+
+    if (-not $SkipPermission -and (Uses 'Opencode')) {
+        $pattern = 'dotnet run --project*'
+        $oc = Join-Path $ProjectPath 'opencode.json'
+        if (-not (Test-Path -LiteralPath $oc) -and (Test-Path -LiteralPath (Join-Path $ProjectPath 'opencode.jsonc'))) {
+            Warn "the project has opencode.jsonc: add ""permission"": {""bash"": {""$pattern"": ""allow""}} to it yourself"
+        } else {
+            if (Test-Path -LiteralPath $oc) {
+                $raw = [IO.File]::ReadAllText($oc, $utf8)
+                try { $json = $raw | ConvertFrom-Json } catch { Die "opencode.json is not valid JSON; fix it or use -SkipPermission" }
+            } else { $raw = $null; $json = [PSCustomObject]@{ '$schema' = 'https://opencode.ai/config.json' } }
+            if (-not $json.PSObject.Properties['permission']) { $json | Add-Member -NotePropertyName permission -NotePropertyValue (New-Object PSObject) }
+            $bash = $json.permission.PSObject.Properties['bash']
+            if ($bash -and $bash.Value -is [string] -and $bash.Value -eq 'allow' -or ($bash -and $bash.Value -isnot [string] -and $bash.Value.PSObject.Properties[$pattern] -and $bash.Value.$pattern -eq 'allow')) {
+                Ok "opencode permission already present: $pattern"
+            } else {
+                if ($raw) {
+                    $backup = "$oc.bak-" + (Get-Date).ToString('yyyyMMdd-HHmmss')
+                    [IO.File]::WriteAllText($backup, $raw, $utf8)
+                    Ok "backed up opencode.json to $backup"
+                }
+                # A plain string (e.g. "ask") becomes the catch-all of an object, so its meaning is kept.
+                if (-not $bash) { $obj = New-Object PSObject }
+                elseif ($bash.Value -is [string]) { $obj = [PSCustomObject]@{ '*' = $bash.Value } }
+                else { $obj = $bash.Value }
+                $obj | Add-Member -NotePropertyName $pattern -NotePropertyValue 'allow' -Force
+                $json.permission | Add-Member -NotePropertyName bash -NotePropertyValue $obj -Force
+                [IO.File]::WriteAllText($oc, ($json | ConvertTo-Json -Depth 32), $utf8)
+                Ok "added opencode permission to opencode.json: $pattern"
+            }
+        }
+    }
+
+    if ($AddRule) {
+        if (Uses 'Claude') { Add-RuleTo (Join-Path $ProjectPath 'CLAUDE.md') }
+        if (Uses 'Opencode') { Add-RuleTo (Join-Path $ProjectPath 'AGENTS.md') }
+    }
 }
 
 # ---------- 5. smoke test ----------
+if ($SmokeTest -and -not $claude) { Warn "smoke test skipped: it runs on Claude Haiku and needs claude"; $SmokeTest = $false }
 if ($SmokeTest) {
     Step 'Smoke test (Haiku, read-only, budget $0.10)'
     $work = $ProjectPath
@@ -177,7 +250,7 @@ Write-Host "   Launcher command (the skill uses it for you):"
 Write-Host "     $runCmd --task .lean-worker/inbox/<name>/task.md --profile code"
 Write-Host ""
 Write-Host "   Next:"
-Write-Host "   1. Restart Claude Code (or start a new session) so it sees the skill."
+Write-Host "   1. Start a new Claude Code / opencode session so it sees the skill."
 if ($ProjectPath) {
     Write-Host "   2. In a session in $ProjectPath, ask:"
     Write-Host "        /lean-worker set up .lean-worker/project.md and profiles.json for this repository"

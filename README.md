@@ -1,12 +1,13 @@
 # lean-worker
 
-A Claude Code skill that runs one coding task in a separate, minimal-context worker: Claude Code
+A skill for orchestrating sessions in Claude Code and opencode. It runs one coding task in a separate,
+minimal-context worker: Claude Code
 (`claude -p`) or opencode (`opencode run`), on Claude or on other providers' models (GLM, DeepSeek,
 Qwen, MiniMax). The orchestrating session gets back the worker's report together with its token
 usage and cost. Near its budget the worker writes a handoff instead of stopping blind, and a fresh
 worker can pick the task up from it.
 
-> **Quick install through your agent:** in a Claude Code session in your project, say
+> **Quick install through your agent:** in a Claude Code or opencode session in your project, say
 > *"Install the lean-worker skill for this project, following
 > https://github.com/sy11a/lean-worker/blob/main/INSTALL.md"*.
 > [INSTALL.md](INSTALL.md) walks the agent through the whole setup and tells it when to stop and ask you.
@@ -66,13 +67,23 @@ On Windows, in PowerShell:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -ProjectPath C:\src\my-product -SmokeTest
 ```
 
-Both installers do the same (flags: `--scope project` / `-Scope Project`, `--skip-permission` /
-`-SkipPermission`):
+Both installers do the same (flags: `--scope project` / `-Scope Project`, `--orchestrator
+claude|opencode|both` / `-Orchestrator Claude|Opencode|Both`, `--skip-permission` / `-SkipPermission`,
+`--add-rule` / `-AddRule`):
 
-1. **Checks prerequisites:** `claude` with `--bare`, a .NET SDK 8 or newer, whether
-   `ANTHROPIC_API_KEY` is set (a missing key is not a failure), and whether opencode is installed.
-2. **Installs the skill** into `~/.claude/skills/lean-worker` (Windows: `%USERPROFILE%\.claude\skills\lean-worker`).
-   The project scope installs into `<project>/.claude/skills` instead.
+1. **Checks prerequisites:** a .NET SDK 8 or newer, `claude` with `--bare` when Claude Code
+   orchestrates, `opencode` when opencode orchestrates, and whether `ANTHROPIC_API_KEY` is set (a missing
+   key is not a failure).
+2. **Installs the skill** for each orchestrator. The default is both when opencode is on PATH, else
+   Claude Code:
+   - Claude Code: `~/.claude/skills/lean-worker` (Windows: `%USERPROFILE%\.claude\skills\lean-worker`), or
+     `<project>/.claude/skills` with the project scope;
+   - opencode: `~/.config/opencode/skills/lean-worker` (or `$XDG_CONFIG_HOME/opencode/...`), or
+     `<project>/.opencode/skills` with the project scope. opencode finds it there even with its import of
+     Claude Code skills turned off.
+
+   The skill's description is loaded into every session of that scope (about 310 characters), so the
+   project scope keeps it out of unrelated projects.
 3. **Builds the launcher once**, so the first worker starts immediately.
 4. **Prepares the project** when `-ProjectPath` is given:
    - creates `.lean-worker/project.md` and `.lean-worker/profiles.json` from the templates.
@@ -82,6 +93,14 @@ Both installers do the same (flags: `--scope project` / `-Scope Project`, `--ski
      so the orchestrator can start workers without a permission prompt. The file is backed up
      first (`settings.json.bak-<stamp>`) and is re-serialised, so any formatting is not kept. Pass
      the skip flag to leave it alone and add the rule yourself.
+   - for opencode, `"permission": {"bash": {"dotnet run --project*": "allow"}}` in `<project>/opencode.json`
+     (created if missing, backed up otherwise). A plain `"bash": "ask"` becomes the object's `"*"`
+     entry. A project with only `opencode.jsonc` gets a warning and edits it by hand.
+   - with the add-rule flag, the delegation rule (`templates/orchestrator-rule.md`: this session
+     orchestrates, workers implement, search and review) is appended once to the file each orchestrator
+     reads: `CLAUDE.md` for Claude Code, `AGENTS.md` for opencode. A `CLAUDE.md` that is a symlink to
+     `AGENTS.md` gets it once. Leave this off in a repository whose instruction files are generated or
+     delivered by another tool.
 5. **Runs one tiny worker** when `-SmokeTest` is given. It uses Haiku, is read-only and has a
    budget of $0.10. The installer prints that worker's result block.
 
@@ -90,7 +109,7 @@ including your price files (`.lean-worker/prices.json`, `~/.config/lean-worker/p
 
 ### 2. Fill in the project notes and profiles
 
-Restart Claude Code, or start a new session, so it picks up the skill. Then, in a session in
+Start a new Claude Code or opencode session so it picks up the skill. Then, in a session in
 your project:
 
 ```
@@ -389,7 +408,8 @@ The worker is kept as lean as in Claude Code:
 - `--mcp-config` is claude-runtime only.
 
 An opencode orchestrator uses the launcher the same way: write the task, run the launcher from the
-project root, read only the result block. `.lean-worker/` is the same for both tools.
+project root, read only the result block. `.lean-worker/` is the same for both tools. opencode's bash
+tool has no background mode, so the skill tells the orchestrator to pass a `timeout` above the worker's own.
 
 ## Launcher reference
 
@@ -504,8 +524,11 @@ Checked on 2026-09-29 with Claude Code 2.1.284, opencode 1.18.32 and .NET SDK 10
     the opencode runtime, including wrap-up and a cross-runtime continuation;
   - the quota command and the chain fallback over a quota threshold;
   - run and scratch paths containing a space;
-- `install.sh` and `install.ps1` (PowerShell 7) into a sandbox home and project, and a re-run that
-  duplicates nothing;
+- `install.sh` and `install.ps1` (PowerShell 7 on Linux) into a sandbox home and project, for Claude Code
+  and opencode orchestrators, user and project scope, with the permission and delegation-rule steps, and
+  a re-run that duplicates nothing: `tests/installer-test.sh`, 16 checks;
+- an opencode orchestrator (MiniMax-M3, Claude Code skill import off) finding the project-scope skill in
+  `.opencode/skills` and launching a worker through it (2026-09-30);
 - the hook's overhead: about 60 ms per tool call.
 
 From earlier checks, still valid: lean mode keeps the project's CLAUDE.md, AGENTS.md and

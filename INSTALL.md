@@ -1,6 +1,6 @@
 # Installing lean-worker: instructions for an AI agent
 
-These instructions are for a Claude Code session that a user has asked to install this skill,
+These instructions are for a Claude Code or opencode session that a user has asked to install this skill,
 for example: *"Install the lean-worker skill for this project, following
 https://github.com/sy11a/lean-worker/blob/main/INSTALL.md"*.
 
@@ -34,26 +34,33 @@ Run each command and report the result to the user in one short list:
 
 | Check | Command | Required |
 |---|---|---|
-| Claude Code supports `--bare` | `claude --help` (look for `--bare`) | yes: stop and tell the user to update Claude Code |
+| Claude Code supports `--bare` | `claude --help` (look for `--bare`) | yes when Claude Code orchestrates or runs workers: stop and tell the user to update Claude Code |
 | .NET SDK 8 or newer | `dotnet --list-sdks` | yes: stop and tell the user to install it |
 | How Claude Code is authenticated | check whether `ANTHROPIC_API_KEY` is set (**never print its value**); if not, the user is on a subscription login (Pro/Max/Team/Enterprise) | no: either works. Workers run in **lean** mode either way (bare mode only with a key and wrap-up off). Do not ask for an API key on a subscription |
 | A shell for the installer | Linux/macOS: `bash --version` (and `jq --version` for the permission step). Windows: `powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"` (or `pwsh`) | yes |
-| opencode (optional) | `opencode --version` | no: needed only for workers with `"runtime": "opencode"` |
+| opencode | `opencode --version` | yes when opencode orchestrates; otherwise needed only for workers in the opencode runtime |
 
-## Step 3: Ask the user two questions
+## Step 3: Ask the user four questions
 
 Ask them together, in one message, and wait for the answer:
 
-1. **Where should the skill be installed?**
-   - (a) For the user, in `~/.claude/skills` (Windows: `%USERPROFILE%\.claude\skills`), so it is available
-     in every project. This is the recommended option.
-   - (b) For this project only, in `<project root>/.claude/skills`, which can be committed and shared with the team.
-2. **May the installer add a permission rule to `<project root>/.claude/settings.json`?** The rule
-   is `Bash(dotnet run --project:*)`, and it lets the orchestrator start workers without a prompt
-   each time.
-   - The installer backs the file up first as `settings.json.bak-<stamp>`.
-   - It rewrites the file as normalised JSON, so the existing formatting is lost.
+1. **Which orchestrators?** Claude Code, opencode, or both. The default is both when opencode is installed.
+2. **Where should the skill be installed?**
+   - (a) For the user: `~/.claude/skills` (Windows: `%USERPROFILE%\.claude\skills`) and/or
+     `~/.config/opencode/skills`, so it is available in every project. Its description then loads into
+     every session (about 310 characters).
+   - (b) For this project only: `<project root>/.claude/skills` and/or `<project root>/.opencode/skills`,
+     which can be committed and shared with the team.
+3. **May the installer add a permission rule** so the orchestrator starts workers without a prompt?
+   The rule is `Bash(dotnet run --project:*)` in `<project root>/.claude/settings.json` and
+   `"dotnet run --project*": "allow"` under `permission.bash` in `<project root>/opencode.json`.
+   - The installer backs each file up first (`.bak-<stamp>`) and rewrites it as normalised JSON, so
+     existing formatting is lost.
    - If the user says no, the installer skips this step and the user approves each launch.
+4. **Should the delegation rule go into the project's instructions?** A short section ("this session
+   orchestrates; implementation, search and review go to lean-worker workers") appended once to
+   `CLAUDE.md` (Claude Code) and/or `AGENTS.md` (opencode). Recommend no if another tool generates or
+   delivers those files.
 
 ## Step 4: Run the installer
 
@@ -62,17 +69,19 @@ Run it from anywhere, pointing at the project root.
 Linux or macOS:
 
 ```
-bash "<repo copy>/install.sh" --project "<project root>" [--scope project] [--skip-permission]
+bash "<repo copy>/install.sh" --project "<project root>" [--orchestrator claude|opencode|both] [--scope project] [--skip-permission] [--add-rule]
 ```
 
 Windows (the shell tool may be Git Bash; call PowerShell explicitly):
 
 ```
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<repo copy>/install.ps1" -ProjectPath "<project root>" [-Scope Project] [-SkipPermission]
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<repo copy>/install.ps1" -ProjectPath "<project root>" [-Orchestrator Claude|Opencode|Both] [-Scope Project] [-SkipPermission] [-AddRule]
 ```
 
-- Add `--scope project` / `-Scope Project` if the user chose (b) in question 1.
-- Add `--skip-permission` / `-SkipPermission` if the user said no to question 2.
+- Add `--orchestrator` / `-Orchestrator` with the answer to question 1.
+- Add `--scope project` / `-Scope Project` if the user chose (b) in question 2.
+- Add `--skip-permission` / `-SkipPermission` if the user said no to question 3.
+- Add `--add-rule` / `-AddRule` if the user said yes to question 4.
 - On Windows, use `pwsh` instead of `powershell.exe` if Windows PowerShell is not available.
 - **If `-ExecutionPolicy Bypass` is refused** (organisation policy), stop and tell the user.
   Do not work around it.
@@ -137,8 +146,9 @@ dotnet run --project "<skill-dir>/launcher" -c Release -- --task ".lean-worker/i
 Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 `Do not read or change any file. Reply with exactly one line: lean-worker smoke test OK`.
 
-`<skill-dir>` is where the skill was installed: `~/.claude/skills/lean-worker`
-(Windows: `%USERPROFILE%\.claude\skills\lean-worker`), or `<project root>/.claude/skills/lean-worker`.
+`<skill-dir>` is where the skill was installed (the installer prints it): `~/.claude/skills/lean-worker`
+(Windows: `%USERPROFILE%\.claude\skills\lean-worker`), `~/.config/opencode/skills/lean-worker`, or the same under
+`<project root>/.claude/skills` / `<project root>/.opencode/skills`.
 
 - The launcher picks the mode itself; the result block shows which one ran.
 - **If it fails with "Not logged in":** in lean mode, ask the user to run `claude` and `/login`.
@@ -155,7 +165,7 @@ Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
    - what went into `project.md` and `profiles.json`, and what still needs their review;
    - the smoke test result: its mode, and its cost. On a subscription, say that the cost is the
   list-price equivalent and the tokens count against the plan's usage;
-   - **that they must restart Claude Code (or start a new session) before `/lean-worker` is available;**
+   - **that they must start a new Claude Code or opencode session before the skill is available;**
    - how to use it: `/lean-worker <what to do>; done when <command> passes`.
 3. Do not commit anything. Whether `.lean-worker/project.md`, `profiles.json` and
    `.claude/settings.json` get committed is the user's decision. Recommend committing the first two.
