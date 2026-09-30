@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installer tests in a sandbox home: both orchestrators, project scope and user scope, re-run idempotence.
-# No model is called. Runs install.sh, and install.ps1 too when pwsh is on PATH.
+# No model is called.
 # Usage: tests/installer-test.sh [--keep]
 set -uo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,14 +36,7 @@ sh_installer() { # $1 = mode, $2 = project for the project-scope mode
         opencode-project) "$repo/install.sh" --project "$2" --scope project --orchestrator opencode --add-rule ;;
     esac
 }
-ps_installer() {
-    case "$1" in
-        both) pwsh -NoProfile -File "$repo/install.ps1" -ProjectPath "$p" -Orchestrator Both -AddRule ;;
-        opencode-project) pwsh -NoProfile -File "$repo/install.ps1" -ProjectPath "$2" -Scope Project -Orchestrator Opencode -AddRule ;;
-    esac
-}
 p="$sb/sh/project"; run_case sh_installer sh
-if command -v pwsh >/dev/null; then p="$sb/ps/project"; run_case ps_installer ps; else echo "(pwsh not found: install.ps1 not tested)"; fi
 
 echo; echo "passed $pass, failed $fail  (sandbox: $sb)"
 [ "${1:-}" = --keep ] || [ $fail -gt 0 ] || rm -rf "$sb"

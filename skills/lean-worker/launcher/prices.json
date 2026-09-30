@@ -15,7 +15,6 @@
       "quota": { "adapter": "zai", "maxPercent": { "5h": 90, "weekly": 85 } }
     },
     "deepseek": { "billing": "metered", "anthropicBaseUrl": "https://api.deepseek.com/anthropic", "keyEnv": "DEEPSEEK_API_KEY" },
-    "alibaba": { "billing": "metered", "keyEnv": "DASHSCOPE_API_KEY" },
     "minimax": { "billing": "metered", "anthropicBaseUrl": "https://api.minimax.io/anthropic", "keyEnv": "MINIMAX_API_KEY" },
     "minimax-coding-plan": {
       "billing": "subscription",
@@ -39,10 +38,6 @@
     "zai/glm-4.7": { "input": 0.6, "output": 2.2, "cacheRead": 0.11, "cacheWrite": 0 },
     "deepseek/deepseek-v4-pro": { "input": 0.435, "output": 0.87, "cacheRead": 0.003625 },
     "deepseek/deepseek-v4-flash": { "input": 0.15, "output": 0.6, "cacheRead": 0.003 },
-    "alibaba/qwen3.6-plus": { "input": 0.5, "output": 3, "cacheRead": 0.05, "cacheWrite": 0.625,
-                              "above": { "tokens": 200000, "input": 2, "output": 6, "cacheRead": 0.2, "cacheWrite": 2.5 } },
-    "alibaba/qwen3.6-flash": { "input": 0.1875, "output": 1.125, "cacheWrite": 0.234375 },
-    "alibaba/qwen3-coder-plus": { "input": 1, "output": 5 },
     "minimax/MiniMax-M3": { "input": 0.3, "output": 1.2, "cacheRead": 0.06,
                             "above": { "tokens": 200000, "input": 0.6, "output": 2.4, "cacheRead": 0.12 } },
     "minimax/MiniMax-M2.7": { "input": 0.3, "output": 1.2, "cacheRead": 0.06, "cacheWrite": 0.375 }

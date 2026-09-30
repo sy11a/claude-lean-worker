@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the lean-worker skill for orchestrating sessions in Claude Code and/or opencode, on Linux or macOS.
-# Runs without any agent. The same steps as install.ps1 (Windows):
+# Runs without any agent. Steps:
 #   1. Checks prerequisites: .NET SDK 8+, claude (with --bare) when Claude Code orchestrates, opencode when
 #      opencode orchestrates, and an API key (optional).
 #   2. Copies skills/lean-worker into each orchestrator's skill directory: ~/.claude/skills and

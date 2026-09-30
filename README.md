@@ -3,7 +3,7 @@
 A skill for orchestrating sessions in Claude Code and opencode. It runs one coding task in a separate,
 minimal-context worker: Claude Code
 (`claude -p`) or opencode (`opencode run`), on Claude or on other providers' models (GLM, DeepSeek,
-Qwen, MiniMax). The orchestrating session gets back the worker's report together with its token
+MiniMax). The orchestrating session gets back the worker's report together with its token
 usage and cost. Near its budget the worker writes a handoff instead of stopping blind, and a fresh
 worker can pick the task up from it.
 
@@ -47,36 +47,28 @@ This is real output from a test run with `--no-bare`. A `--bare` run starts smal
     minimal profile from flags instead. See [Authentication and modes](#authentication-and-modes).
 - .NET SDK 8 or newer. The launcher targets `net8.0` with `RollForward=LatestMajor`, so it
   also runs on newer runtimes. It has no NuGet dependencies.
-- Linux, macOS or Windows. The installer is `install.sh` (bash; `jq` for the permission step) or
-  `install.ps1` (PowerShell).
+- Linux or macOS. The installer is `install.sh` (bash; `jq` for the permission step).
 - Optional: [opencode](https://opencode.ai), for workers with `"runtime": "opencode"`.
 
 ## Setup after download
 
 ### 1. Run the installer (no agent involved)
 
-From the downloaded repository, on Linux or macOS:
+From the downloaded repository:
 
 ```bash
 ./install.sh --project ~/src/my-product --smoke-test
 ```
 
-On Windows, in PowerShell:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -ProjectPath C:\src\my-product -SmokeTest
-```
-
-Both installers do the same (flags: `--scope project` / `-Scope Project`, `--orchestrator
-claude|opencode|both` / `-Orchestrator Claude|Opencode|Both`, `--skip-permission` / `-SkipPermission`,
-`--add-rule` / `-AddRule`):
+The installer (flags: `--scope project`, `--orchestrator claude|opencode|both`, `--skip-permission`,
+`--add-rule`):
 
 1. **Checks prerequisites:** a .NET SDK 8 or newer, `claude` with `--bare` when Claude Code
    orchestrates, `opencode` when opencode orchestrates, and whether `ANTHROPIC_API_KEY` is set (a missing
    key is not a failure).
 2. **Installs the skill** for each orchestrator. The default is both when opencode is on PATH, else
    Claude Code:
-   - Claude Code: `~/.claude/skills/lean-worker` (Windows: `%USERPROFILE%\.claude\skills\lean-worker`), or
+   - Claude Code: `~/.claude/skills/lean-worker`, or
      `<project>/.claude/skills` with the project scope;
    - opencode: `~/.config/opencode/skills/lean-worker` (or `$XDG_CONFIG_HOME/opencode/...`), or
      `<project>/.opencode/skills` with the project scope. opencode finds it there even with its import of
@@ -85,7 +77,7 @@ claude|opencode|both` / `-Orchestrator Claude|Opencode|Both`, `--skip-permission
    The skill's description is loaded into every session of that scope (about 310 characters), so the
    project scope keeps it out of unrelated projects.
 3. **Builds the launcher once**, so the first worker starts immediately.
-4. **Prepares the project** when `-ProjectPath` is given:
+4. **Prepares the project** when `--project` is given:
    - creates `.lean-worker/project.md` and `.lean-worker/profiles.json` from the templates.
      Files that already exist are never overwritten.
    - adds `.lean-worker/runs/`, `.lean-worker/inbox/` and `.lean-worker/runs.jsonl` to `.gitignore`.
@@ -101,7 +93,7 @@ claude|opencode|both` / `-Orchestrator Claude|Opencode|Both`, `--skip-permission
      reads: `CLAUDE.md` for Claude Code, `AGENTS.md` for opencode. A `CLAUDE.md` that is a symlink to
      `AGENTS.md` gets it once. Leave this off in a repository whose instruction files are generated or
      delivered by another tool.
-5. **Runs one tiny worker** when `-SmokeTest` is given. It uses Haiku, is read-only and has a
+5. **Runs one tiny worker** when `--smoke-test` is given. It uses Haiku, is read-only and has a
    budget of $0.10. The installer prints that worker's result block.
 
 The installer is safe to re-run: it updates the skill and leaves your project files alone,
@@ -164,7 +156,7 @@ one-call probe:
 |---|---|---|---|---|
 | CLAUDE.md, CLAUDE.local.md, AGENTS.md, `.claude/rules` | off | off | `--keep-claude-md` to keep them | about −4k (a 13.5 KB CLAUDE.md) |
 | Auto memory (also its instructions in the system prompt) | off | off | `--keep-memory` to keep it | about −3k, even with no memory files |
-| Hooks (user, project, plugins) | off | off (`disableAllHooks`). **Managed hooks still run:** a non-managed `disableAllHooks` cannot turn them off | `--keep-hooks`, or `"keepHooks": true` in a profile | about −1k on the test machine; depends on your hooks |
+| Hooks (user, project, plugins) | off | off (`--setting-sources ""`). **Managed hooks still run:** managed settings always load | `--keep-hooks`, or `"keepHooks": true` in a profile | about −1k on the test machine; depends on your hooks |
 | Skills | off | off | always off (`--disable-slash-commands`) | small |
 | MCP servers | off | off | always `--strict-mcp-config`; a profile can name servers | depends on the servers |
 | Plugins, plugin sync, LSP | off | loaded | with skills, hooks and MCP off, and the worker's tool list fixed, a plugin has no remaining way into the worker's context | none measured |
@@ -225,21 +217,6 @@ Orchestrator -> you: "Done, tests green. Worker: 14 API calls, $0.38."
 The orchestrator is told to read only the result block, and not the worker's transcript or the
 full diff. That keeps its own context, which it re-reads on every turn, small. Every run is also
 recorded as one line in `.lean-worker/runs.jsonl` (see below).
-
-**Later, optionally: an MCP tool.** The launcher can be wrapped in a .NET MCP server built with the
-official `ModelContextProtocol` C# SDK. It would expose `run_worker(task, profile)`,
-`worker_status(runId)` and `worker_costs(since)`.
-
-- **Gains:**
-  - structured JSON results instead of a text block;
-  - one tool to grant permission to;
-  - a spend summary in one call.
-- **Costs:**
-  - an MCP call blocks the orchestrator and has a timeout, so long tasks would need a start/status pair;
-  - one more server to register;
-  - its tool schemas enter the context.
-
-This is not built. Use the Bash flow first and build the MCP server when a real need shows up.
 
 ## Budget wrap-up and continuation
 
@@ -315,7 +292,7 @@ personal file, and the result block names any the project file tried to set.
   },
   "models": {
     "zai/glm-6": { "input": 1.5, "output": 5, "cacheRead": 0.3, "cacheWrite": 0 },
-    "alibaba/qwen-x": { "input": 3, "output": 12, "currency": "CNY",
+    "my-plan/model-x": { "input": 3, "output": 12, "currency": "CNY",
                         "above": { "tokens": 200000, "input": 6, "output": 24 } }
   }
 }
@@ -379,7 +356,8 @@ single "go" from the operator:
   starts with the cheapest capable model: a subscription while it has quota, then cheap metered models,
   then Claude. `review` should use a different model family from the one that wrote the change.
 - `LeanWorker stats` shows, per profile and model, the success rate, the cost per successful task and the
-  quota used per run. Move a model down the chain when its cost per success is worse than the next
+  quota used per run. Success is the worker's own status: the launcher does not see the orchestrator's
+  check of the done-criterion. Move a model down the chain when its cost per success is worse than the next
   model's, even if it is cheaper per token.
 
 ### Pricing a manual session
@@ -511,10 +489,10 @@ escalations, cost, cost per success and quota % per run.
 Checked on 2026-09-29 with Claude Code 2.1.284, opencode 1.18.32 and .NET SDK 10, on Linux (Fedora).
 
 **Tested on Linux:**
-- the launcher builds with no warnings; 37 unit tests (`dotnet test tests/LeanWorker.Tests`): pricing,
+- the launcher builds with no warnings; 39 unit tests (`dotnet test tests/LeanWorker.Tests`): pricing,
   stream parsing for Anthropic, z.ai and opencode (including permission denials and cut-off sessions), the
   meter, quota parsing, the key-routing guard, the write scope, the profile templates and `stats`;
-- `tests/acceptance.sh`, 20 checks with real workers (about $0.65 list price in total, most of it one
+- `tests/acceptance.sh`, 24 checks with real workers (about $0.65 list price in total, most of it one
   deliberately overpriced case), all passing:
   - wrap-up, continuation and continuation of a continuation on Claude Haiku (subscription login);
   - the meter matching Claude Code's own cost within 5% (to the cent in practice);
@@ -523,10 +501,11 @@ Checked on 2026-09-29 with Claude Code 2.1.284, opencode 1.18.32 and .NET SDK 10
   - GLM-5.3 on z.ai's GLM Coding Plan, in the claude runtime (Anthropic-compatible endpoint) and in
     the opencode runtime, including wrap-up and a cross-runtime continuation;
   - the quota command and the chain fallback over a quota threshold;
+  - an opencode permission denial, model traits, the write scope, `stats --json` and `cost`;
   - run and scratch paths containing a space;
-- `install.sh` and `install.ps1` (PowerShell 7 on Linux) into a sandbox home and project, for Claude Code
+- `install.sh` into a sandbox home and project, for Claude Code
   and opencode orchestrators, user and project scope, with the permission and delegation-rule steps, and
-  a re-run that duplicates nothing: `tests/installer-test.sh`, 16 checks;
+  a re-run that duplicates nothing: `tests/installer-test.sh`, 8 checks;
 - an opencode orchestrator (MiniMax-M3, Claude Code skill import off) finding the project-scope skill in
   `.opencode/skills` and launching a worker through it (2026-09-30);
 - the hook's overhead: about 60 ms per tool call.
@@ -537,12 +516,9 @@ From earlier checks, still valid: lean mode keeps the project's CLAUDE.md, AGENT
 **Not yet tested:**
 - MiniMax quota in the CN region (the international endpoint was verified on 2026-09-29);
 - a `--bare` run with an API key;
-- DeepSeek and Qwen end to end (their prices and endpoints ship from their documentation). MiniMax-M3 on the
+- DeepSeek end to end (its prices and endpoint ship from its documentation). MiniMax-M3 on the
   Token Plan runs as a worker in both runtimes (2026-09-29/30; acceptance cases 11 and 12 with
-  `LW_OPENCODE_MODEL=minimax-coding-plan/MiniMax-M3`);
-- Windows, including `claude`/`opencode` installed as npm `.cmd` shims, which the launcher starts
-  through `cmd.exe`, and the hook command's quoting there;
-- `install.ps1` under Windows PowerShell 5.1. It is written ASCII-only and without 7-only syntax.
+  `LW_OPENCODE_MODEL=minimax-coding-plan/MiniMax-M3`).
 
 ## License
 

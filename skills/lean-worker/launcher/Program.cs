@@ -426,18 +426,7 @@ internal static class Launcher
             StandardOutputEncoding = Json.Utf8,
             StandardErrorEncoding = Json.Utf8,
         };
-        // An npm-installed CLI on Windows is a .cmd shim, which must be started through cmd.exe.
-        if (OperatingSystem.IsWindows() && prep.Executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
-        {
-            psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-            psi.ArgumentList.Add("/d");
-            psi.ArgumentList.Add("/c");
-            psi.ArgumentList.Add(prep.Executable);
-        }
-        else
-        {
-            psi.FileName = prep.Executable;
-        }
+        psi.FileName = prep.Executable;
         foreach (var arg in prep.Args) psi.ArgumentList.Add(arg);
         foreach (var (k, v) in prep.Env)
         {
@@ -495,16 +484,10 @@ internal static class Launcher
 
     public static string? FindOnPath(string command)
     {
-        var exts = OperatingSystem.IsWindows()
-            ? new[] { ".exe", ".cmd", ".bat" }
-            : new[] { "" };
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            foreach (var ext in exts)
-            {
-                var candidate = Path.Combine(dir.Trim('"'), command + ext);
-                if (File.Exists(candidate)) return candidate;
-            }
+            var candidate = Path.Combine(dir.Trim('"'), command);
+            if (File.Exists(candidate)) return candidate;
         }
         return null;
     }
