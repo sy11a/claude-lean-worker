@@ -1,4 +1,4 @@
-# claude-lean-worker
+# lean-worker
 
 A Claude Code skill that runs one coding task in a separate, minimal-context worker: Claude Code
 (`claude -p`) or opencode (`opencode run`), on Claude or on other providers' models (GLM, DeepSeek,
@@ -8,7 +8,7 @@ worker can pick the task up from it.
 
 > **Quick install through your agent:** in a Claude Code session in your project, say
 > *"Install the lean-worker skill for this project, following
-> https://github.com/sy11a/claude-lean-worker/blob/main/INSTALL.md"*.
+> https://github.com/sy11a/lean-worker/blob/main/INSTALL.md"*.
 > [INSTALL.md](INSTALL.md) walks the agent through the whole setup and tells it when to stop and ask you.
 > A fuller prompt to paste is in [AGENT-INSTALL-PROMPT.md](AGENT-INSTALL-PROMPT.md).
 

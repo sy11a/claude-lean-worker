@@ -1,4 +1,4 @@
-# claude-lean-worker
+# lean-worker
 
 The lean-worker skill: a launcher (`skills/lean-worker/launcher`, .NET) that runs one task in a
 minimal-context worker (`claude -p` or `opencode run`), meters its cost, wraps it up near its budget and
@@ -12,16 +12,16 @@ operator's word with `gh issue create`. A pull request that finishes one says `C
 
 1. Start from an up-to-date `main` (`git switch main && git pull --ff-only`), then branch before the
    first edit (`fix/<slug>`, `feature/<slug>`, `docs/<slug>`). For parallel work use a worktree
-   (`git worktree add ../claude-lean-worker-<slug> -b <branch> origin/main`) instead of switching
+   (`git worktree add ../lean-worker-<slug> -b <branch> origin/main`) instead of switching
    branches under another session.
 2. Verify, commit (no AI co-author trailers), `git push -u origin <branch>`, then
    `gh pr create --base main` (what, how verified; no AI attribution footer).
 3. Merge it on GitHub yourself: `gh pr merge --merge --delete-branch`. Then
    `git switch main && git pull --ff-only` in the main checkout.
 4. After the merge, remove every worktree and local branch the change used:
-   `git worktree remove ../claude-lean-worker-<slug> && git branch -d <branch>`, then `git worktree prune`.
-   **Never remove `../claude-lean-worker-pinned`**: it is sy11a_ctxops's pinned launcher. It moves only
-   deliberately (`git -C ../claude-lean-worker-pinned checkout --detach <commit>`, then a rebuild), when no
+   `git worktree remove ../lean-worker-<slug> && git branch -d <branch>`, then `git worktree prune`.
+   **Never remove `../lean-worker-pinned`**: it is sy11a_ctxops's pinned launcher. It moves only
+   deliberately (`git -C ../lean-worker-pinned checkout --detach <commit>`, then a rebuild), when no
    worker runs from it, and the move is recorded in a ctxops `docs/history/` entry.
 
 Never commit to `main` directly and never force-push it.

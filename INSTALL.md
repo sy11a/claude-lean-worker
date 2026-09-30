@@ -2,7 +2,7 @@
 
 These instructions are for a Claude Code session that a user has asked to install this skill,
 for example: *"Install the lean-worker skill for this project, following
-https://github.com/sy11a/claude-lean-worker/blob/main/INSTALL.md"*.
+https://github.com/sy11a/lean-worker/blob/main/INSTALL.md"*.
 
 Follow the steps in order. Each step says what to run, what counts as success, and when to stop
 and ask the user. Do not skip the questions: two steps change the user's configuration.
@@ -18,7 +18,7 @@ repository.
 Clone it into a temporary folder, not into the project:
 
 ```
-git clone --depth 1 https://github.com/sy11a/claude-lean-worker.git "<temp-dir>/claude-lean-worker"
+git clone --depth 1 https://github.com/sy11a/lean-worker.git "<temp-dir>/lean-worker"
 ```
 
 - On Linux or macOS, use `${TMPDIR:-/tmp}` for `<temp-dir>`. On Windows, use `$env:TEMP` (PowerShell) or `$TEMP` (Git Bash).
