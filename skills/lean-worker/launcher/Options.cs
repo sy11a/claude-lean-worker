@@ -52,7 +52,7 @@ internal sealed class Options
           cost --claude <session-id|file.jsonl> [--provider <name>] | --opencode <session-id>
                                      price a manual session with prices.json
           stats [--since <yyyy-mm-dd>] [--json]
-                                     runs per profile and model: success rate, wrap-ups, escalations, cost per success,
+                                     runs per profile and model: success rate (worker status), wrap-ups, escalations, cost per success,
                                      quota used; --json for other tools (schema_version as in runs.jsonl)
           prices                     the merged price book: sources and each entry's date
         """;

@@ -37,7 +37,7 @@ share of the budget (default 80%) every tool call is blocked, so the worker's la
 ## 0. Project setup (once per project, then maintained)
 
 The skill knows nothing about the project's stack. Two files in the project configure it.
-If the user ran the installer with a project (`install.sh --project`, `install.ps1 -ProjectPath`),
+If the user ran the installer with a project (`install.sh --project`),
 both already exist as templates. Fill them in;
 do not recreate them.
 Both are the user's files: propose content, let the user edit it, and never overwrite
@@ -193,7 +193,7 @@ other commands (same `dotnet run --project "<skill-dir>/launcher" -c Release --`
 
 - `quota`: the usage windows of every subscription with a quota adapter (z.ai GLM Coding Plan, MiniMax Token Plan).
 - `cost --claude <session-id>` or `cost --opencode <session-id>`: a manual session priced with the book.
-- `stats [--since <date>] [--json]`: per profile and model, success rate, wrap-ups, escalations, cost per
+- `stats [--since <date>] [--json]`: per profile and model, success rate (the worker's own status), wrap-ups, escalations, cost per
   success and quota used.
 - `prices`: the merged price book, with each entry's date.
 

@@ -21,12 +21,12 @@ Clone it into a temporary folder, not into the project:
 git clone --depth 1 https://github.com/sy11a/lean-worker.git "<temp-dir>/lean-worker"
 ```
 
-- On Linux or macOS, use `${TMPDIR:-/tmp}` for `<temp-dir>`. On Windows, use `$env:TEMP` (PowerShell) or `$TEMP` (Git Bash).
+- Use `${TMPDIR:-/tmp}` for `<temp-dir>`.
 - **If the clone fails** (network policy, proxy, GitHub blocked), stop. Ask the user to download
   the repository ZIP and tell you where they extracted it. Do not look for workarounds around
   the network policy.
 
-Success: `<repo copy>/install.sh`, `<repo copy>/install.ps1` and `<repo copy>/skills/lean-worker/SKILL.md` exist.
+Success: `<repo copy>/install.sh` and `<repo copy>/skills/lean-worker/SKILL.md` exist.
 
 ## Step 2: Check prerequisites
 
@@ -37,7 +37,7 @@ Run each command and report the result to the user in one short list:
 | Claude Code supports `--bare` | `claude --help` (look for `--bare`) | yes when Claude Code orchestrates or runs workers: stop and tell the user to update Claude Code |
 | .NET SDK 8 or newer | `dotnet --list-sdks` | yes: stop and tell the user to install it |
 | How Claude Code is authenticated | check whether `ANTHROPIC_API_KEY` is set (**never print its value**); if not, the user is on a subscription login (Pro/Max/Team/Enterprise) | no: either works. Workers run in **lean** mode either way (bare mode only with a key and wrap-up off). Do not ask for an API key on a subscription |
-| A shell for the installer | Linux/macOS: `bash --version` (and `jq --version` for the permission step). Windows: `powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"` (or `pwsh`) | yes |
+| A shell for the installer | `bash --version` (and `jq --version` for the permission step) | yes |
 | opencode | `opencode --version` | yes when opencode orchestrates; otherwise needed only for workers in the opencode runtime |
 
 ## Step 3: Ask the user four questions
@@ -46,7 +46,7 @@ Ask them together, in one message, and wait for the answer:
 
 1. **Which orchestrators?** Claude Code, opencode, or both. The default is both when opencode is installed.
 2. **Where should the skill be installed?**
-   - (a) For the user: `~/.claude/skills` (Windows: `%USERPROFILE%\.claude\skills`) and/or
+   - (a) For the user: `~/.claude/skills` and/or
      `~/.config/opencode/skills`, so it is available in every project. Its description then loads into
      every session (about 310 characters).
    - (b) For this project only: `<project root>/.claude/skills` and/or `<project root>/.opencode/skills`,
@@ -66,25 +66,14 @@ Ask them together, in one message, and wait for the answer:
 
 Run it from anywhere, pointing at the project root.
 
-Linux or macOS:
-
 ```
 bash "<repo copy>/install.sh" --project "<project root>" [--orchestrator claude|opencode|both] [--scope project] [--skip-permission] [--add-rule]
 ```
 
-Windows (the shell tool may be Git Bash; call PowerShell explicitly):
-
-```
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<repo copy>/install.ps1" -ProjectPath "<project root>" [-Orchestrator Claude|Opencode|Both] [-Scope Project] [-SkipPermission] [-AddRule]
-```
-
-- Add `--orchestrator` / `-Orchestrator` with the answer to question 1.
-- Add `--scope project` / `-Scope Project` if the user chose (b) in question 2.
-- Add `--skip-permission` / `-SkipPermission` if the user said no to question 3.
-- Add `--add-rule` / `-AddRule` if the user said yes to question 4.
-- On Windows, use `pwsh` instead of `powershell.exe` if Windows PowerShell is not available.
-- **If `-ExecutionPolicy Bypass` is refused** (organisation policy), stop and tell the user.
-  Do not work around it.
+- Add `--orchestrator` with the answer to question 1.
+- Add `--scope project` if the user chose (b) in question 2.
+- Add `--skip-permission` if the user said no to question 3.
+- Add `--add-rule` if the user said yes to question 4.
 
 Read the output. Success means:
 
@@ -123,7 +112,7 @@ it to one message with at most five questions.
   generator. Keep the list short.
 - Keep the other profiles (`read`, `edit`, `research`, `review`) unless the user wants changes.
   Delete `research` if the user's policy bars web access for agents.
-- Ask whether the user runs other providers (GLM, DeepSeek, Qwen, MiniMax) or opencode. If so, offer
+- Ask whether the user runs other providers (GLM, DeepSeek, MiniMax) or opencode. If so, offer
   model chains (`"model": ["zai-coding-plan/glm-5.3", "claude-sonnet-5-5"]`) and `"runtime"`; see the
   README section "Models, prices and subscriptions". Do not change prices unless the user asks.
 - If the project has an obvious extra task class (a slow integration-test suite, a separate
@@ -146,8 +135,8 @@ dotnet run --project "<skill-dir>/launcher" -c Release -- --task ".lean-worker/i
 Before running it, create `.lean-worker/inbox/smoke-test/task.md` containing:
 `Do not read or change any file. Reply with exactly one line: lean-worker smoke test OK`.
 
-`<skill-dir>` is where the skill was installed (the installer prints it): `~/.claude/skills/lean-worker`
-(Windows: `%USERPROFILE%\.claude\skills\lean-worker`), `~/.config/opencode/skills/lean-worker`, or the same under
+`<skill-dir>` is where the skill was installed (the installer prints it): `~/.claude/skills/lean-worker`,
+`~/.config/opencode/skills/lean-worker`, or the same under
 `<project root>/.claude/skills` / `<project root>/.opencode/skills`.
 
 - The launcher picks the mode itself; the result block shows which one ran.

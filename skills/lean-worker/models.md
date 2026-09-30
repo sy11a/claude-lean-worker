@@ -3,7 +3,7 @@
 A profile names a **role** (`read`, `code`, `review`, ...) and a chain of models for it. What a worker
 needs because of **the model** is below. What depends on **the provider** (billing, quota, endpoint, key)
 is in `launcher/prices.json`, under `providers`. One model can come from several providers: for example
-GLM from z.ai or from the Alibaba Token Plan. Its traits stay the same either way.
+GLM from `zai-coding-plan` or from metered `zai`. Its traits stay the same either way.
 
 Status: **measured** = seen in real runs (source given); **not verified** = no worker run yet.
 
@@ -18,7 +18,7 @@ Anthropic-compatible endpoint, opencode otherwise, unless the profile or `--runt
 | MiniMax-M3 | `minimax-coding-plan` (subscription), `minimax` | claude, opencode | Chains shell commands (`\|`, `;`, `,`), and every segment must be allowed: give Bash profiles the read-only helpers (`head`, `tail`, `wc`, `grep`, `sed -n`, `jq`, `echo`, git reads). Edited files outside its task's scope: always launch code tasks with `--write-scope`. Many small calls: a 270-test code task took 241 calls, $1.27 list-price equivalent, +4% of the 5h window. | measured (sy11a_ctxops P6, 2026-09-29); **enforced** (`modelTraits`) |
 | MiniMax-M2.7 | `minimax-coding-plan`, `minimax` | claude, opencode | Cheaper sibling for `read`. | not verified |
 | GLM-5.3, GLM-5.3-flash | `zai-coding-plan` (subscription), `zai` | claude, opencode | z.ai reports all usage in `message_delta` (the meter reads it). The plan has a peak-hour multiplier. | measured (acceptance tests, 2026-09-29) |
-| Qwen 3.8, DeepSeek v4 | Alibaba Token Plan (no price-book provider yet), `deepseek` | opencode (Alibaba); claude or opencode (`deepseek`) | Alibaba: an OpenAI-compatible opencode provider; add it and its models to `.lean-worker/prices.json`, or the launcher prices them at its unknown-model fallback. No quota adapter. | not verified |
+| DeepSeek v4 | `deepseek` | claude, opencode | Prices and endpoint from the provider's documentation. | not verified |
 | Claude Haiku / Sonnet / Opus | `anthropic` | claude | The chain's last step and the orchestrator. Cross-provider review: review a change with a model of another family than the one that wrote it. | measured |
 
 When a run teaches something about a model, add it here (with its source), not to every task.
