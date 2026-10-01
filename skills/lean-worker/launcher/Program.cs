@@ -221,7 +221,9 @@ internal static class Launcher
         Directory.CreateDirectory(runDir);
         File.WriteAllText(Path.Combine(runDir, "task.md"), taskText, Json.Utf8);
 
-        // The worker's system notes = project notes + per-task system file, saved into the run dir.
+        // The worker's system notes = project notes + per-task system file. The path passed to the worker is
+        // content-addressed, so it is the same in every run with identical content: opencode prints the file
+        // path into the system prompt, and a per-run path breaks Anthropic's prompt cache for repeated tasks.
         var parts = new List<string>();
         var projectNotes = Path.Combine(runsRoot, "project.md");
         if (!o.NoProjectNotes && File.Exists(projectNotes)) parts.Add(File.ReadAllText(projectNotes, Json.Utf8));
@@ -229,8 +231,11 @@ internal static class Launcher
         string? runSystem = null;
         if (parts.Count > 0)
         {
-            runSystem = Path.GetFullPath(Path.Combine(runDir, "system.md"));
-            File.WriteAllText(runSystem, string.Join(Environment.NewLine + Environment.NewLine, parts), Json.Utf8);
+            var content = string.Join(Environment.NewLine + Environment.NewLine, parts);
+            var sha12 = Sha12(content);
+            runSystem = Path.GetFullPath(Path.Combine(runsRoot, "system", $"{sha12}.md"));
+            AtomicWrite(runSystem, content);
+            File.WriteAllText(Path.Combine(runDir, "system.md"), content, Json.Utf8);
         }
 
         // ---------- run ----------
@@ -283,6 +288,10 @@ internal static class Launcher
         var contexts = calls.Select(c => c.Context).ToList();
         var first = contexts.Count > 0 ? contexts[0] : 0;
         var peak = contexts.Count > 0 ? contexts.Max() : 0;
+        var firstCall = calls.Count > 0 ? calls[0] : null;
+        double? firstCallCacheReadShare = null;
+        if (firstCall is not null && firstCall.Context > 0)
+            firstCallCacheReadShare = Math.Round((double)firstCall.CacheRead / firstCall.Context, 3);
         var hookChecks = File.Exists(Path.Combine(runDir, "hook.log")) ? File.ReadLines(Path.Combine(runDir, "hook.log")).Count() : 0;
         var next = status is "wrapped-up" or "success" ? null : NextInChain(chain, provider, model);
 
@@ -322,6 +331,8 @@ internal static class Launcher
             ["model_traits"] = traits?.Key,
             ["tokens"] = tok,
             ["context_first_call"] = first,
+            ["first_call_cache_read"] = JsonValue.Create(firstCall?.CacheRead),
+            ["first_call_cache_read_share"] = JsonValue.Create(firstCallCacheReadShare),
             ["context_peak"] = peak,
             ["permission_denials"] = outcome.Denials,
             ["write_scope"] = writeScope is null ? null : new JsonArray(writeScope.Select(p => (JsonNode)p).ToArray()),
@@ -356,7 +367,8 @@ internal static class Launcher
         var wrapUpText = wrapUp ? $"wrap-up at ${(budget * wrapUpAt).ToString("0.####", ic)}{(meter.WrappedUp ? " (triggered)" : "")}, {hookChecks} hook checks" : "wrap-up off";
         w.WriteLine($"budget:   ${budget.ToString("0.####", ic)}, {wrapUpText}{(capKilled ? ", STOPPED at the budget" : "")}");
         w.WriteLine($"tokens:   input {N(tok["input"])} | cache write {N(tok["cache_write"])} | cache read {N(tok["cache_read"])} | output {N(tok["output"])} (thinking {N(tok["thinking"])})");
-        w.WriteLine($"context:  first call {first.ToString("N0", ic)} | peak {peak.ToString("N0", ic)}");
+        var firstShareText = firstCallCacheReadShare is { } s ? $" (cache read {Math.Round(s * 100).ToString(ic)}%)" : "";
+        w.WriteLine($"context:  first call {first.ToString("N0", ic)}{firstShareText} | peak {peak.ToString("N0", ic)}");
         if (quotaAfter is not null) w.WriteLine($"quota:    {quotaAfter.Line(quotaBefore)}");
         if (changed is not null)
             w.WriteLine($"files:    {changed.Count} changed in the working tree{(outOfScope is null ? " (no write scope given)" : $", {outOfScope.Count} outside the write scope")}");
@@ -490,6 +502,28 @@ internal static class Launcher
             if (File.Exists(candidate)) return candidate;
         }
         return null;
+    }
+
+    /// <summary>First 12 hex chars of the SHA-256 of the UTF-8 bytes; the path is the same in every run of identical content.</summary>
+    private static string Sha12(string content)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(Json.Utf8.GetBytes(content));
+        return Convert.ToHexString(hash, 0, 6).ToLowerInvariant();
+    }
+
+    /// <summary>Writes <paramref name="content"/> to <paramref name="path"/> atomically (temp + move), only if the file is absent.</summary>
+    private static void AtomicWrite(string path, string content)
+    {
+        if (File.Exists(path)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temp, content, Json.Utf8);
+            try { File.Move(temp, path); }
+            catch (IOException) { /* lost the race; the other writer's content has the same hash */ }
+        }
+        finally { try { File.Delete(temp); } catch { } }
     }
 }
 
