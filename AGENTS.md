@@ -28,6 +28,6 @@ Never commit to `main` directly and never force-push it.
 
 ## Verify
 
-- Unit tests: `dotnet test tests/LeanWorker.Tests -v q -nologo`.
+- Unit tests: `dotnet test --project tests/LeanWorker.Tests -v q` (Microsoft Testing Platform, opted in by `global.json`).
 - Acceptance (real workers, cents of list price): `tests/acceptance.sh`. It needs GLM; while GLM is not in
   use, run `LW_OPENCODE_MODEL=minimax-coding-plan/MiniMax-M3 tests/acceptance.sh --claude-only`.
