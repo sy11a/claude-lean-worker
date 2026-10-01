@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using LeanWorker;
 using Xunit;
@@ -434,5 +436,255 @@ public class ModelTraitsTests
         Assert.Equal("claude", Launcher.DefaultRuntime(Book().Provider("anthropic")));
         Assert.Equal("claude", Launcher.DefaultRuntime(Book().Provider("p")));
         Assert.Equal("opencode", Launcher.DefaultRuntime(Book().Provider("q")));
+    }
+}
+
+/// <summary>Tests below mutate PATH, Console.Out and the current directory: process-global state that must not
+/// race with another test running in parallel.</summary>
+[CollectionDefinition("launcher-process-state", DisableParallelization = true)]
+public class LauncherProcessStateCollection;
+
+/// <summary>The runtime is handed the stable, content-addressed system path (not a run-dir copy), whichever runtime.</summary>
+[Collection("launcher-process-state")]
+public class RuntimeSystemPathTests
+{
+    private static RunSpec Spec(string? systemFile, bool replace = false) => new(
+        RunDir: Directory.CreateTempSubdirectory("lw-rundir").FullName, Provider: "anthropic", Model: "claude-haiku-4-5",
+        Effort: "medium", Variant: null, Tools: ["Read"], Allowed: [], Budget: 2m, WrapUp: false, PermissionMode: "acceptEdits",
+        McpConfig: null, SystemFile: systemFile, ReplaceSystemPrompt: replace, Mode: "bare", CacheTtl: "5m",
+        KeepClaudeMd: true, KeepMemory: true, KeepHooks: false, KeepUserEnv: false, ClaudeSettings: null,
+        ProviderInfo: new Provider("anthropic", null));
+
+    [Fact]
+    public void Claude_appends_the_given_system_file_path()
+    {
+        using var path = new FakeOnPath("claude");
+        var p = new ClaudeRuntime().Prepare(Spec("/stable/system/abc123.md"));
+        var i = p.Args.IndexOf("--append-system-prompt-file");
+        Assert.True(i >= 0 && p.Args[i + 1] == "/stable/system/abc123.md");
+        Assert.DoesNotContain("--system-prompt-file", p.Args);
+    }
+
+    [Fact]
+    public void Claude_replaces_with_the_given_system_file_path_when_asked()
+    {
+        using var path = new FakeOnPath("claude");
+        var p = new ClaudeRuntime().Prepare(Spec("/stable/system/abc123.md", replace: true));
+        var i = p.Args.IndexOf("--system-prompt-file");
+        Assert.True(i >= 0 && p.Args[i + 1] == "/stable/system/abc123.md");
+        Assert.DoesNotContain("--append-system-prompt-file", p.Args);
+    }
+
+    [Fact]
+    public void Opencode_instructions_point_to_the_given_system_file_path()
+    {
+        using var path = new FakeOnPath("opencode");
+        var p = new OpencodeRuntime().Prepare(Spec("/stable/system/abc123.md"));
+        var config = JsonNode.Parse(p.Env["OPENCODE_CONFIG_CONTENT"]!)!.AsObject();
+        Assert.Equal(["/stable/system/abc123.md"], config["instructions"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    /// <summary>Prepends a directory with a stub executable of the given name to PATH, so Launcher.FindOnPath finds it; restores PATH on dispose.</summary>
+    private sealed class FakeOnPath : IDisposable
+    {
+        private readonly string? _old = Environment.GetEnvironmentVariable("PATH");
+
+        public FakeOnPath(string name)
+        {
+            var dir = Directory.CreateTempSubdirectory("lw-path").FullName;
+            File.WriteAllText(Path.Combine(dir, name), "#!/bin/sh\ncat >/dev/null\n");
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(dir, name), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + _old);
+        }
+
+        public void Dispose() => Environment.SetEnvironmentVariable("PATH", _old);
+    }
+}
+
+/// <summary>Full runs of Launcher.Run against a stub "claude" executable: the stable system-file path and the
+/// first call's cache-read fields. mode=bare keeps the lean-mode settings/hooks machinery out of the way.</summary>
+[Collection("launcher-process-state")]
+public class SystemPathAndFirstCallCacheTests
+{
+    private static string Sha12(string content) => Convert.ToHexString(SHA256.HashData(new UTF8Encoding(false).GetBytes(content)), 0, 6).ToLowerInvariant();
+
+    private static string Stub(string script, string binaryName = "claude")
+    {
+        var dir = Directory.CreateTempSubdirectory("lw-stub").FullName;
+        var path = Path.Combine(dir, binaryName);
+        File.WriteAllText(path, "#!/bin/sh\ncat >/dev/null\n" + script);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return dir;
+    }
+
+    private const string OpencodeOneTextLine = """
+        printf '%s\n' '{"type":"text","sessionID":"s1","part":{"messageID":"m1","text":"DONE"}}'
+        """;
+
+    private const string OneCallStream = """
+        printf '%s\n' '{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"output_tokens":0,"cache_read_input_tokens":9200,"cache_creation_input_tokens":0}}}}'
+        printf '%s\n' '{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":50}}}'
+        printf '%s\n' '{"type":"result","is_error":false,"result":"DONE","session_id":"s1","total_cost_usd":0.01,"num_turns":1,"permission_denials":[]}'
+        """;
+
+    private const string NoCallStream = """
+        printf '%s\n' '{"type":"result","is_error":false,"result":"DONE","session_id":"s1","total_cost_usd":0,"num_turns":1,"permission_denials":[]}'
+        """;
+
+    /// <summary>Runs the launcher with a stub "claude" on PATH, a dummy key, and no git tree to scan; returns stdout.</summary>
+    private static string RunLauncher(string runsRoot, string taskFile, string projectNotes, string script, string binaryName = "claude", Action<Options>? configure = null)
+    {
+        Directory.CreateDirectory(runsRoot);
+        File.WriteAllText(Path.Combine(runsRoot, "project.md"), projectNotes, new UTF8Encoding(false));
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        var oldKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        var oldCwd = Directory.GetCurrentDirectory();
+        var cleanCwd = Directory.CreateTempSubdirectory("lw-cwd").FullName;
+        var outWriter = new StringWriter();
+        var oldOut = Console.Out;
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", Stub(script, binaryName) + Path.PathSeparator + oldPath);
+            Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", "dummy-test-key");
+            Directory.SetCurrentDirectory(cleanCwd);
+            Console.SetOut(outWriter);
+            // A fresh name per run: runs.jsonl/run-dir names are keyed by name + second-resolution timestamp.
+            var o = new Options { TaskFile = taskFile, RunsRoot = runsRoot, Model = "anthropic/claude-haiku-4-5", Mode = "bare", Name = Guid.NewGuid().ToString("N") };
+            configure?.Invoke(o);
+            var code = Launcher.Run(o);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            Console.SetOut(oldOut);
+            Directory.SetCurrentDirectory(oldCwd);
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+            Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", oldKey);
+        }
+        return outWriter.ToString();
+    }
+
+    private static string RunDirFrom(string stdout) =>
+        stdout.Split('\n').First(l => l.StartsWith("run:", StringComparison.Ordinal)).Split("run:", 2)[1].Trim();
+
+    [Fact]
+    public void Same_system_content_reuses_the_same_stable_path_across_runs_and_profiles()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+        var expected = Path.Combine(runsRoot, "system", $"{Sha12("same notes")}.md");
+
+        var out1 = RunLauncher(runsRoot, task, "same notes", NoCallStream);
+        var run1 = RunDirFrom(out1);
+        Assert.True(File.Exists(expected));
+        Assert.Equal("same notes", File.ReadAllText(expected));
+        Assert.Contains(expected, File.ReadAllText(Path.Combine(run1, "command.txt")));
+        Assert.Equal("same notes", File.ReadAllText(Path.Combine(run1, "system.md")));
+        var writeTime1 = File.GetLastWriteTimeUtc(expected);
+
+        var out2 = RunLauncher(runsRoot, task, "same notes", NoCallStream);
+        var run2 = RunDirFrom(out2);
+        Assert.NotEqual(run1, run2);
+        Assert.Equal(writeTime1, File.GetLastWriteTimeUtc(expected)); // reused, not rewritten
+        Assert.Equal("same notes", File.ReadAllText(expected));
+        Assert.Contains(expected, File.ReadAllText(Path.Combine(run2, "command.txt")));
+        Assert.Equal("same notes", File.ReadAllText(Path.Combine(run2, "system.md")));
+    }
+
+    [Fact]
+    public void Different_system_content_gets_a_different_path()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+
+        var out1 = RunLauncher(runsRoot, task, "notes A", NoCallStream);
+        var out2 = RunLauncher(runsRoot, task, "notes B", NoCallStream);
+        var pathA = Path.Combine(runsRoot, "system", $"{Sha12("notes A")}.md");
+        var pathB = Path.Combine(runsRoot, "system", $"{Sha12("notes B")}.md");
+        Assert.NotEqual(pathA, pathB);
+        Assert.True(File.Exists(pathA));
+        Assert.True(File.Exists(pathB));
+        Assert.Contains(pathA, File.ReadAllText(Path.Combine(RunDirFrom(out1), "command.txt")));
+        Assert.Contains(pathB, File.ReadAllText(Path.Combine(RunDirFrom(out2), "command.txt")));
+    }
+
+    [Fact]
+    public void Claude_replace_system_prompt_uses_the_stable_path_not_the_run_dir_copy()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+        var expected = Path.Combine(runsRoot, "system", $"{Sha12("replace notes")}.md");
+
+        var stdout = RunLauncher(runsRoot, task, "replace notes", NoCallStream, configure: o => o.ReplaceSystemPrompt = true);
+        var runDir = RunDirFrom(stdout);
+        var command = File.ReadAllText(Path.Combine(runDir, "command.txt"));
+        var args = command.Split(' ');
+        var i = Array.IndexOf(args, "--system-prompt-file");
+        Assert.True(i >= 0 && i + 1 < args.Length, command);
+        Assert.Equal(expected, args[i + 1]);
+        Assert.NotEqual(Path.Combine(runDir, "system.md"), args[i + 1]);
+        Assert.DoesNotContain(Path.Combine(runDir, "system.md"), command);
+    }
+
+    [Fact]
+    public void Opencode_instructions_point_to_the_stable_path_not_the_run_dir_copy()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+        var expected = Path.Combine(runsRoot, "system", $"{Sha12("opencode notes")}.md");
+
+        var stdout = RunLauncher(runsRoot, task, "opencode notes", OpencodeOneTextLine, binaryName: "opencode",
+            configure: o => { o.Runtime = "opencode"; o.Mode = "auto"; });
+        var runDir = RunDirFrom(stdout);
+        var config = JsonNode.Parse(File.ReadAllText(Path.Combine(runDir, "opencode-config.json")))!.AsObject();
+        var instructions = config["instructions"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.Equal([expected], instructions);
+        Assert.DoesNotContain(Path.Combine(runDir, "system.md"), instructions);
+    }
+
+    [Fact]
+    public void First_call_cache_read_fields_and_the_context_line_are_reported()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+
+        var stdout = RunLauncher(runsRoot, task, "notes", OneCallStream);
+        var runDir = RunDirFrom(stdout);
+        var summary = JsonNode.Parse(File.ReadAllText(Path.Combine(runDir, "summary.json")))!.AsObject();
+        Assert.Equal(9200, summary["first_call_cache_read"]!.GetValue<long>());
+        Assert.Equal(0.902, summary["first_call_cache_read_share"]!.GetValue<double>());
+        Assert.Equal(10200, summary["context_first_call"]!.GetValue<long>());
+
+        var ledgerLine = File.ReadLines(Path.Combine(runsRoot, "runs.jsonl")).Last();
+        var ledger = JsonNode.Parse(ledgerLine)!.AsObject();
+        Assert.Equal(9200, ledger["first_call_cache_read"]!.GetValue<long>());
+        Assert.Equal(0.902, ledger["first_call_cache_read_share"]!.GetValue<double>());
+
+        Assert.Contains("context:  first call 10,200 (cache read 90%) | peak 10,200", stdout);
+    }
+
+    [Fact]
+    public void No_calls_leaves_the_cache_read_fields_null_and_the_context_line_has_no_share()
+    {
+        var runsRoot = Directory.CreateTempSubdirectory("lw-runs").FullName;
+        var task = Path.Combine(runsRoot, "task.md");
+        File.WriteAllText(task, "do nothing");
+
+        var stdout = RunLauncher(runsRoot, task, "notes", NoCallStream);
+        var runDir = RunDirFrom(stdout);
+        var summary = JsonNode.Parse(File.ReadAllText(Path.Combine(runDir, "summary.json")))!.AsObject();
+        Assert.True(summary["first_call_cache_read"] is null || summary["first_call_cache_read"]!.GetValueKind() == System.Text.Json.JsonValueKind.Null);
+        Assert.True(summary["first_call_cache_read_share"] is null || summary["first_call_cache_read_share"]!.GetValueKind() == System.Text.Json.JsonValueKind.Null);
+
+        var ledgerLine = File.ReadLines(Path.Combine(runsRoot, "runs.jsonl")).Last();
+        var ledger = JsonNode.Parse(ledgerLine)!.AsObject();
+        Assert.True(ledger["first_call_cache_read"] is null || ledger["first_call_cache_read"]!.GetValueKind() == System.Text.Json.JsonValueKind.Null);
+
+        Assert.Contains("context:  first call 0 | peak 0", stdout);
     }
 }

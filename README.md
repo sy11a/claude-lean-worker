@@ -30,7 +30,7 @@ model:    claude-haiku-4-5, effort low, profile code, mode lean
 work:     3 turns, 3 API calls, 0m13s
 cost:     $0.0105 (list price reported by Claude Code)
 tokens:   input 25 | cache write 971 | cache read 43,573 | output 830 (thinking 501)
-context:  first call 14,283 | peak 15,253
+context:  first call 14,283 (cache read 93%) | peak 15,253
 --- worker report ---
 ...
 ```
@@ -208,7 +208,7 @@ Orchestrator:  writes .lean-worker/inbox/order-retry/task.md
                   status: success ...
                   cost:   $0.3812
                   tokens: input 210 | cache write 18,300 | cache read 351,000 | output 7,900
-                  context: first call 5,100 | peak 31,000
+                  context: first call 5,100 (cache read 98%) | peak 31,000
                   --- worker report --- ...
                Bash: <your test command>   <- checks the done-criterion itself
 Orchestrator -> you: "Done, tests green. Worker: 14 API calls, $0.38."
@@ -458,7 +458,7 @@ Exit codes: `0` success, `1` the worker reported an error or failed, `2` the lau
 `.lean-worker/runs/<stamp>-<name>/` holds:
 
 - `task.md`
-- `system.md`, the notes the worker actually received
+- `system.md`, the notes the worker actually received (the worker reads them through a content-addressed path `<runs-root>/system/<sha12>.md` that stays the same across runs of identical content, so Anthropic's prompt cache survives a repeat; opencode prints the instructions file's path into the system prompt, and a per-run path breaks it)
 - `command.txt`
 - `stream.jsonl`, the worker's JSON output (Claude Code's token-by-token deltas are left out)
 - `settings.json` (claude runtime, lean mode) or `opencode-config.json` (opencode runtime)
@@ -473,7 +473,7 @@ Exit codes: `0` success, `1` the worker reported an error or failed, `2` the lau
 - cost as metered with the price book, and the cost the runtime reported, if any;
 - budget, wrap-up threshold, whether it fired, and hook checks;
 - the input / cache-write / cache-read / output / thinking token split;
-- first-call and peak context;
+- first-call and peak context, the first call's cache-read tokens, and the cache-read share of the first call (3 decimals);
 - quota before and after the run, and the percentage it used, on a subscription with a quota adapter;
 - the next model the run offered (`escalate_to`), if any;
 - the write scope, the files the run changed in the git working tree, and those outside the scope.

@@ -138,7 +138,7 @@ work:     12 turns, 12 API calls, 3m41s
 cost:     $0.1123 (list-price equivalent; subscription, not billed)
 budget:   $3, wrap-up at $2.4, 12 hook checks
 tokens:   input 310 | cache write 0 | cache read 402,118 | output 9,870 (thinking 3,200)
-context:  first call 4,812 | peak 38,420
+context:  first call 4,812 (cache read 98%) | peak 38,420
 quota:    5h 10% -> 12%, weekly 41% -> 42%
 --- worker report ---
 ...
@@ -200,7 +200,11 @@ other commands (same `dotnet run --project "<skill-dir>/launcher" -c Release --`
 ## Records
 
 Every run leaves `.lean-worker/runs/<stamp>-<name>/` containing `task.md`, `system.md` (the
-notes the worker actually received), `command.txt`, `stream.jsonl`, `summary.json` and
-`report.md` (plus `wrapup.json` and `hook.log` when wrap-up is on). It also appends one JSON line
-to `.lean-worker/runs.jsonl` with the profile, runtime, provider, model, billing, status, turns,
-API calls, cost, budget, wrap-up, token split, first-call and peak context, and quota used.
+notes the worker actually received; the worker reads them through a content-addressed path
+`<runs-root>/system/<sha12>.md` shared by every run of identical content, so Anthropic's prompt
+cache survives a repeat — opencode prints the instructions path into the system prompt, and a
+per-run path would break it), `command.txt`, `stream.jsonl`, `summary.json` and `report.md`
+(plus `wrapup.json` and `hook.log` when wrap-up is on). It also appends one JSON line to
+`.lean-worker/runs.jsonl` with the profile, runtime, provider, model, billing, status, turns,
+API calls, cost, budget, wrap-up, token split, first-call and peak context, the first call's
+cache-read tokens and its cache-read share, and quota used.
