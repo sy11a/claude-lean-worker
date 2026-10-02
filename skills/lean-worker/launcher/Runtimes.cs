@@ -283,7 +283,41 @@ internal sealed class OpencodeRuntime : IRuntime
             },
         };
         if (s.SystemFile is not null) config["instructions"] = new JsonArray(s.SystemFile);
-        if (UserProviderBlock(s.Provider) is { } provider) config["provider"] = new JsonObject { [s.Provider] = provider };
+        // opencode sends x-session-affinity / X-Session-Id on every request, which z.ai routes by: a fresh worker
+        // lands on a node without its prefix cached (first call 42-51% read). Force both to a fixed value so
+        // every worker reuses the cached one (99% read). Set on provider.models.<model>.headers, the only level
+        // opencode merges after its own (provider options.headers are overridden and do not work). Only zai
+        // providers are touched; non-zai entries pass through as-is, and a zai entry that isn't an object
+        // (a string, array, ...) falls through to the minimal block below.
+        var providerFromUser = false;
+        JsonObject? providerBlock = null;
+        JsonNode? passthroughNode = null;
+        if (UserProviderBlock(s.Provider) is { } provider)
+        {
+            if (s.Provider.StartsWith("zai", StringComparison.OrdinalIgnoreCase))
+            {
+                if (provider is JsonObject obj)
+                {
+                    providerFromUser = true;
+                    providerBlock = obj;
+                }
+            }
+            else
+            {
+                providerFromUser = true;
+                passthroughNode = provider;
+            }
+        }
+        if (s.Provider.StartsWith("zai", StringComparison.OrdinalIgnoreCase))
+        {
+            providerBlock ??= new JsonObject();
+            ApplyZaiSessionAffinityHeaders(providerBlock, s.Model);
+            config["provider"] = new JsonObject { [s.Provider] = providerBlock };
+        }
+        else if (passthroughNode is not null)
+        {
+            config["provider"] = new JsonObject { [s.Provider] = passthroughNode };
+        }
 
         var env = new Dictionary<string, string?>
         {
@@ -302,9 +336,13 @@ internal sealed class OpencodeRuntime : IRuntime
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1";
             env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1";
         }
-        // The config may carry a provider's key, so the record keeps it without the provider block.
+        // The config may carry a provider's key, so the record keeps it without the provider block. A block the
+        // launcher built itself contains only the affinity headers, no key, so it is safe to keep verbatim.
         var recorded = (JsonObject)config.DeepClone();
-        if (recorded.ContainsKey("provider")) recorded["provider"] = "(copied from the user's opencode config; not recorded)";
+        if (recorded.ContainsKey("provider"))
+            recorded["provider"] = providerFromUser
+                ? "(copied from the user's opencode config; not recorded)"
+                : new JsonObject { [s.Provider] = providerBlock!.DeepClone() };
         File.WriteAllText(Path.Combine(s.RunDir, "opencode-config.json"), recorded.ToJsonString(Json.Indented), Json.Utf8);
 
         var a = new List<string> { "run", "--format", "json", "--agent", "lean-worker", "-m", $"{s.Provider}/{s.Model}" };
@@ -325,6 +363,23 @@ internal sealed class OpencodeRuntime : IRuntime
             catch (System.Text.Json.JsonException) { }
         }
         return null;
+    }
+
+    /// <summary>Adds the two headers that pin every worker to the same z.ai node, keeping any the user set.</summary>
+    private static void ApplyZaiSessionAffinityHeaders(JsonObject provider, string model)
+    {
+        if (provider["models"] is not JsonObject models) provider["models"] = models = new JsonObject();
+        if (models[model] is not JsonObject m) models[model] = m = new JsonObject();
+        if (m["headers"] is not JsonObject headers) m["headers"] = headers = new JsonObject();
+        var hasAffinity = false;
+        var hasSessionId = false;
+        foreach (var k in headers.Select(h => h.Key))
+        {
+            if (string.Equals(k, "x-session-affinity", StringComparison.OrdinalIgnoreCase)) hasAffinity = true;
+            if (string.Equals(k, "X-Session-Id", StringComparison.OrdinalIgnoreCase)) hasSessionId = true;
+        }
+        if (!hasAffinity) headers["x-session-affinity"] = "lean-worker";
+        if (!hasSessionId) headers["X-Session-Id"] = "lean-worker";
     }
 
     public Usage? Parse(JsonObject obj, Outcome o)
