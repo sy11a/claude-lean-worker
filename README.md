@@ -377,7 +377,11 @@ The worker is kept as lean as in Claude Code:
   them). The worker's shell commands get your own `XDG_CONFIG_HOME` back, so git and other tools behave
   as usual.
 - A custom provider defined in your opencode config is carried into the worker's config (in memory; the
-  recorded `opencode-config.json` leaves it out, since it may hold a key).
+  recorded `opencode-config.json` leaves it out, since it may hold a key). For providers whose id starts with
+  `zai` (z.ai's coding plan and others) the launcher pins `x-session-affinity` and `X-Session-Id` to
+  `lean-worker` on `provider.<id>.models.<model>.headers`, the only level opencode merges after its own:
+  z.ai routes by those headers, so every fresh worker would otherwise land on a node without its prefix
+  cached (first call 42-51% cache read, 99% with the headers fixed).
 - Tools map from the profile's Claude Code names (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`,
   `WebFetch`, `WebSearch`) to opencode permissions; every other tool is denied. `Bash` runs only the
   `allowedTools` patterns (`Bash(git diff:*)` → `git diff*`); any other command is rejected, since
