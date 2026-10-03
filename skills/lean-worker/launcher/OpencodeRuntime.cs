@@ -30,9 +30,42 @@ internal sealed class OpencodeRuntime : IRuntime
             throw new LaunchException("--mcp-config is supported by the claude runtime only");
         }
 
-        // A clean config home: no global instructions, plugins, skills or MCP servers reach the worker.
-        // Logins stay in the data directory, which is not moved.
-        string xdg = Path.GetFullPath(Path.Combine(s.RunDir, "opencode-config"));
+        string xdg = InstallPlugin(s.RunDir);
+        JsonObject permission = Permissions(s);
+
+        JsonObject config = new()
+        {
+            ["autoupdate"] = false,
+            ["share"] = "disabled",
+            ["permission"] = permission,
+            ["agent"] = new JsonObject
+            {
+                ["lean-worker"] = new JsonObject { ["mode"] = "primary", ["model"] = $"{s.Provider}/{s.Model}", ["permission"] = permission.DeepClone() },
+            },
+        };
+        if (s.SystemFile is not null)
+        {
+            config["instructions"] = new JsonArray(s.SystemFile);
+        }
+
+        (bool providerFromUser, JsonObject? providerBlock) = AddProviderConfig(s, config);
+        Dictionary<string, string?> env = WorkerEnv(s, xdg, config);
+        WriteRecordedConfig(s, config, providerFromUser, providerBlock);
+
+        List<string> a = ["run", "--format", "json", "--agent", "lean-worker", "-m", $"{s.Provider}/{s.Model}"];
+        if (s.Variant is not null)
+        {
+            a.AddRange(["--variant", s.Variant]);
+        }
+
+        return new Prepared(opencode, a, env, "opencode " + string.Join(' ', a.Select(x => Runtimes.Quote(x))));
+    }
+
+    // A clean config home: no global instructions, plugins, skills or MCP servers reach the worker.
+    // Logins stay in the data directory, which is not moved.
+    private static string InstallPlugin(string runDir)
+    {
+        string xdg = Path.GetFullPath(Path.Combine(runDir, "opencode-config"));
         string pluginDir = Path.Combine(xdg, "opencode", "plugins");
         _ = Directory.CreateDirectory(pluginDir);
         string plugin = Path.Combine(AppContext.BaseDirectory, "opencode-plugin.ts");
@@ -42,7 +75,11 @@ internal sealed class OpencodeRuntime : IRuntime
         }
 
         File.Copy(plugin, Path.Combine(pluginDir, "lean-worker.ts"), overwrite: true);
+        return xdg;
+    }
 
+    private static JsonObject Permissions(RunSpec s)
+    {
         JsonObject permission = new() { ["*"] = "deny" };
         foreach (string tool in s.Tools)
         {
@@ -72,27 +109,17 @@ internal sealed class OpencodeRuntime : IRuntime
 
             permission["bash"] = bash;
         }
+        return permission;
+    }
 
-        JsonObject config = new()
-        {
-            ["autoupdate"] = false,
-            ["share"] = "disabled",
-            ["permission"] = permission,
-            ["agent"] = new JsonObject
-            {
-                ["lean-worker"] = new JsonObject { ["mode"] = "primary", ["model"] = $"{s.Provider}/{s.Model}", ["permission"] = permission.DeepClone() },
-            },
-        };
-        if (s.SystemFile is not null)
-        {
-            config["instructions"] = new JsonArray(s.SystemFile);
-        }
-        // opencode sends x-session-affinity / X-Session-Id on every request, which z.ai routes by: a fresh worker
-        // lands on a node without its prefix cached (first call 42-51% read). Force both to a fixed value so
-        // every worker reuses the cached one (99% read). Set on provider.models.<model>.headers, the only level
-        // opencode merges after its own (provider options.headers are overridden and do not work). Only zai
-        // providers are touched; non-zai entries pass through as-is, and a zai entry that isn't an object
-        // (a string, array, ...) falls through to the minimal block below.
+    // opencode sends x-session-affinity / X-Session-Id on every request, which z.ai routes by: a fresh worker
+    // lands on a node without its prefix cached (first call 42-51% read). Force both to a fixed value so
+    // every worker reuses the cached one (99% read). Set on provider.models.<model>.headers, the only level
+    // opencode merges after its own (provider options.headers are overridden and do not work). Only zai
+    // providers are touched; non-zai entries pass through as-is, and a zai entry that isn't an object
+    // (a string, array, ...) falls through to the minimal block below.
+    private static (bool FromUser, JsonObject? Block) AddProviderConfig(RunSpec s, JsonObject config)
+    {
         bool providerFromUser = false;
         JsonObject? providerBlock = null;
         JsonNode? passthroughNode = null;
@@ -122,7 +149,11 @@ internal sealed class OpencodeRuntime : IRuntime
         {
             config["provider"] = new JsonObject { [s.Provider] = passthroughNode };
         }
+        return (providerFromUser, providerBlock);
+    }
 
+    private static Dictionary<string, string?> WorkerEnv(RunSpec s, string xdg, JsonObject config)
+    {
         Dictionary<string, string?> env = new(StringComparer.Ordinal)
         {
             ["XDG_CONFIG_HOME"] = xdg,
@@ -140,8 +171,13 @@ internal sealed class OpencodeRuntime : IRuntime
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1";
             env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1";
         }
-        // The config may carry a provider's key, so the record keeps it without the provider block. A block the
-        // launcher built itself contains only the affinity headers, no key, so it is safe to keep verbatim.
+        return env;
+    }
+
+    // The config may carry a provider's key, so the record keeps it without the provider block. A block the
+    // launcher built itself contains only the affinity headers, no key, so it is safe to keep verbatim.
+    private static void WriteRecordedConfig(RunSpec s, JsonObject config, bool providerFromUser, JsonObject? providerBlock)
+    {
         JsonObject recorded = (JsonObject)config.DeepClone();
         if (recorded.ContainsKey("provider"))
         {
@@ -160,14 +196,6 @@ internal sealed class OpencodeRuntime : IRuntime
         }
 
         File.WriteAllText(Path.Combine(s.RunDir, "opencode-config.json"), recorded.ToJsonString(Json.Indented), Json.Utf8);
-
-        List<string> a = ["run", "--format", "json", "--agent", "lean-worker", "-m", $"{s.Provider}/{s.Model}"];
-        if (s.Variant is not null)
-        {
-            a.AddRange(["--variant", s.Variant]);
-        }
-
-        return new Prepared(opencode, a, env, "opencode " + string.Join(' ', a.Select(x => Runtimes.Quote(x))));
     }
 
     /// <summary>
