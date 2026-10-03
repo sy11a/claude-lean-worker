@@ -14,6 +14,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 
 namespace LeanWorker;
@@ -170,7 +171,7 @@ internal static class Launcher
             {
                 pickReason = string.Empty;
             }
-            else if (i == 0)
+            else if (i is 0)
             {
                 pickReason = "first in chain";
             }
@@ -243,7 +244,7 @@ internal static class Launcher
         // claude runtime: bare = `claude --bare` (API key only, skips all hooks, so no wrap-up);
         // lean = the same minimal profile from flags, for a subscription login, a key, or another provider.
         string mode = "n/a";
-        if (runtimeName == "claude")
+        if (runtimeName is "claude")
         {
             mode = o.Mode switch
             {
@@ -251,14 +252,14 @@ internal static class Launcher
                 "bare" or "lean" => o.Mode,
                 _ => throw new LaunchException($"invalid mode '{o.Mode}' (auto | bare | lean)"),
             };
-            if (mode == "bare" && (!hasKey || provider is not "anthropic"))
+            if (mode is "bare" && (!hasKey || provider is not "anthropic"))
             {
                 throw new LaunchException("--mode bare needs ANTHROPIC_API_KEY (or --claude-settings with an apiKeyHelper) and an Anthropic model: --bare never reads " +
                                           "OAuth or the keychain. With a subscription login (e.g. Enterprise), use --mode lean or leave --mode auto.");
             }
         }
         bool wrapUp = wrapUpAt > 0 && mode is not "bare";
-        if (wrapUpAt > 0 && mode == "bare")
+        if (wrapUpAt > 0 && mode is "bare")
         {
             notes.Add("bare mode skips hooks, so wrap-up is off; the budget is still enforced");
         }
@@ -335,7 +336,7 @@ internal static class Launcher
         Outcome outcome = new();
         string streamPath = Path.Combine(runDir, "stream.jsonl");
         string stderrPath = Path.Combine(runDir, "stderr.txt");
-        (int exitCode, bool timedOut, bool capKilled) = await RunWorkerAsync(prepared, taskText, streamPath, stderrPath, o.TimeoutMinutes, runtime.Record, line =>
+        (int exitCode, bool timedOut, bool capKilled) = await RunWorkerAsync(prepared, taskText, streamPath, stderrPath, o.TimeoutMinutes, line => runtime.Record(line), line =>
         {
             if (Json.TryParseObject(line) is not { } obj)
             {
@@ -372,7 +373,7 @@ internal static class Launcher
             {
                 status = "timed-out";
             }
-            else if (exitCode != 0)
+            else if (exitCode is not 0)
             {
                 status = "crashed";
             }
@@ -432,8 +433,13 @@ internal static class Launcher
             ["mode"] = mode,
             ["billing"] = billing,
             ["cache_ttl"] = cacheTtl,
-            ["hooks"] = runtimeName == "opencode" ? "user plugins off (clean config)"
-                        : mode == "bare" ? "off (bare)" : keepHooks ? "on" : "off (managed hooks still run)",
+            ["hooks"] = (runtimeName, mode, keepHooks) switch
+            {
+                ("opencode", _, _) => "user plugins off (clean config)",
+                (_, "bare", _) => "off (bare)",
+                (_, _, true) => "on",
+                _ => "off (managed hooks still run)",
+            },
             ["status"] = status,
             ["subtype"] = outcome.Subtype,
             ["terminal_reason"] = outcome.TerminalReason,
@@ -476,13 +482,13 @@ internal static class Launcher
         await w.WriteLineAsync("LEAN-WORKER RESULT").ConfigureAwait(false);
         await w.WriteLineAsync($"run:      {runDir}").ConfigureAwait(false);
         await w.WriteLineAsync(string.Create(CultureInfo.InvariantCulture, $"status:   {status}  (subtype={outcome.Subtype}, reason={outcome.TerminalReason}, exit={exitCode})")).ConfigureAwait(false);
-        string knob = runtimeName == "opencode" ? $"variant {variant ?? "default"}" : $"effort {effort}";
+        string knob = runtimeName is "opencode" ? $"variant {variant ?? "default"}" : $"effort {effort}";
         await w.WriteLineAsync($"model:    {provider}/{model}{(pickReason.Length > 0 ? $" ({pickReason})" : string.Empty)}, {knob}, profile {profileName ?? "(none)"}").ConfigureAwait(false);
-        await w.WriteLineAsync(runtimeName == "opencode"
+        await w.WriteLineAsync(runtimeName is "opencode"
             ? $"runtime:  opencode, {summary["hooks"]}"
             : $"runtime:  claude, mode {mode}, hooks {summary["hooks"]}, cache {cacheTtl}").ConfigureAwait(false);
         await w.WriteLineAsync(string.Create(CultureInfo.InvariantCulture, $"work:     {outcome.Turns} turns, {calls.Count} API calls, {(int)elapsed.TotalMinutes}m{elapsed.Seconds:00}s")).ConfigureAwait(false);
-        string costNote = billing == "subscription" ? "list-price equivalent; subscription, not billed" : "list price; metered";
+        string costNote = billing is "subscription" ? "list-price equivalent; subscription, not billed" : "list price; metered";
         string reported = outcome.ReportedCost is { } rc && Math.Abs(rc - meter.Spent) > Math.Max(0.0005m, meter.Spent * 0.05m) ? string.Create(CultureInfo.InvariantCulture, $"; runtime reported ${rc:0.0000}") : string.Empty;
         await w.WriteLineAsync($"cost:     ${meter.Spent.ToString("0.0000", ic)} ({costNote}{reported})").ConfigureAwait(false);
         string wrapUpText = wrapUp ? string.Create(CultureInfo.InvariantCulture, $"wrap-up at ${(budget * wrapUpAt).ToString("0.####", ic)}{(meter.WrappedUp ? " (triggered)" : string.Empty)}, {hookChecks} hook checks") : "wrap-up off";
@@ -559,7 +565,7 @@ internal static class Launcher
     {
         return p.Billing switch
         {
-            "auto" when runtime == "claude" => hasKey ? "metered" : "subscription",
+            "auto" when runtime is "claude" => hasKey ? "metered" : "subscription",
             "auto" => "metered",
             var b => b,
         };
@@ -624,8 +630,10 @@ internal static class Launcher
         }
 
         using Process p = Process.Start(psi) ?? throw new LaunchException($"could not start {prep.Executable}");
-        await using StreamWriter stream = new(streamPath, append: false, Json.Utf8);
-        await using StreamWriter stderr = new(stderrPath, append: false, Json.Utf8);
+        StreamWriter stream = new(streamPath, append: false, Json.Utf8);
+        await using ConfiguredAsyncDisposable streamDisposal = stream.ConfigureAwait(false);
+        StreamWriter stderr = new(stderrPath, append: false, Json.Utf8);
+        await using ConfiguredAsyncDisposable stderrDisposal = stderr.ConfigureAwait(false);
         TaskCompletionSource outDone = new();
         TaskCompletionSource errDone = new();
         bool capKilled = false;
@@ -691,7 +699,7 @@ internal static class Launcher
     /// <summary>
     /// The claude runtime reaches Anthropic and any provider with an Anthropic-compatible endpoint; others need opencode.
     /// </summary>
-    internal static string DefaultRuntime(Provider p) => p.Name == "anthropic" || p.AnthropicBaseUrl is not null ? "claude" : "opencode";
+    internal static string DefaultRuntime(Provider p) => p.Name is "anthropic" || p.AnthropicBaseUrl is not null ? "claude" : "opencode";
 
     public static string? FindOnPath(string command)
     {

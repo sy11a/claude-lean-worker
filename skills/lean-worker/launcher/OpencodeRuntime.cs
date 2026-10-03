@@ -153,7 +153,7 @@ internal sealed class OpencodeRuntime : IRuntime
             {
                 JsonObject b = new()
                 {
-                    [s.Provider] = providerBlock!.DeepClone()
+                    [s.Provider] = providerBlock!.DeepClone(),
                 };
                 recorded["provider"] = b;
             }
@@ -167,7 +167,7 @@ internal sealed class OpencodeRuntime : IRuntime
             a.AddRange(["--variant", s.Variant]);
         }
 
-        return new Prepared(opencode, a, env, "opencode " + string.Join(' ', a.Select(Runtimes.Quote)));
+        return new Prepared(opencode, a, env, "opencode " + string.Join(' ', a.Select(x => Runtimes.Quote(x))));
     }
 
     /// <summary>
@@ -239,10 +239,12 @@ internal sealed class OpencodeRuntime : IRuntime
             headers["x-session-affinity"] = "lean-worker";
         }
 
-        if (!hasSessionId)
+        if (hasSessionId)
         {
-            headers["X-Session-Id"] = "lean-worker";
+            return;
         }
+
+        headers["X-Session-Id"] = "lean-worker";
     }
 
     public Usage? Parse(JsonObject line, Outcome o)
@@ -252,23 +254,26 @@ internal sealed class OpencodeRuntime : IRuntime
         switch (Json.Str(line, "type"))
         {
             case "text":
-                if (part is not null)
                 {
-                    string? messageId = Json.Str(part, "messageID");
-                    if (messageId != o.LastMessageId) { o.Texts.Clear(); o.LastMessageId = messageId; }
-                    if (Json.Str(part, "text") is { Length: > 0 } t)
+                    if (part is not null)
                     {
-                        o.Texts.Add(t);
+                        string? messageId = Json.Str(part, "messageID");
+                        if (messageId != o.LastMessageId) { o.Texts.Clear(); o.LastMessageId = messageId; }
+                        if (Json.Str(part, "text") is { Length: > 0 } t)
+                        {
+                            o.Texts.Add(t);
+                        }
                     }
+
+                    break;
                 }
-                break;
             case "error":
                 {
                     o.IsError = true;
                     o.Texts.Add(line["error"]?.ToJsonString() ?? "error");
                     break;
                 }
-            case "tool_use" when part is not null && part["state"] is JsonObject state && Json.Str(state, "status") == "error"
+            case "tool_use" when (part?["state"]) is JsonObject state && Json.Str(state, "status") is "error"
                                  && Json.Str(state, "error") is { } err && IsPermissionError(err):
                 {
                     o.Denials++;
@@ -300,7 +305,7 @@ internal sealed class OpencodeRuntime : IRuntime
         // opencode has no final result event: the run ends when the session goes idle. A last step that asked for
         // tools means the session was cut off before the model could answer (an auto-rejected permission prompt).
         o.HasResult = o.Texts.Count > 0 && o.LastStepReason is not "tool-calls";
-        if (exitCode != 0)
+        if (exitCode is not 0)
         {
             o.IsError = true;
         }
