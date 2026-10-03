@@ -55,7 +55,7 @@ internal static class WriteScope
                 }
 
                 string full = Path.Combine(root, path);
-                dirty[path] = File.Exists(full) ? Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(full).ConfigureAwait(false))) : "-";
+                dirty[path] = File.Exists(full) ? Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(full, CancellationToken.None).ConfigureAwait(false))) : "-";
             }
         }
         return new Snapshot(root, dirty);
@@ -136,8 +136,8 @@ internal static class WriteScope
                 return null;
             }
 
-            Task<string> output = p.StandardOutput.ReadToEndAsync();
-            _ = p.StandardError.ReadToEndAsync();
+            Task<string> output = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            _ = p.StandardError.ReadToEndAsync(CancellationToken.None);
             if (!p.WaitForExit(60_000)) { try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } return null; }
             return p.ExitCode is 0 ? await output.ConfigureAwait(false) : null;
         }

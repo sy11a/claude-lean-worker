@@ -71,8 +71,9 @@ internal static class Quota
         using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(10) };
         using HttpRequestMessage req = new(HttpMethod.Get, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Runtimes.ProviderKey(p));
-        using HttpResponseMessage res = http.Send(req);
-        string body = new StreamReader(res.Content.ReadAsStream()).ReadToEnd();
+        using HttpResponseMessage res = http.Send(req, CancellationToken.None);
+        using StreamReader reader = new(res.Content.ReadAsStream(CancellationToken.None));
+        string body = reader.ReadToEnd();
         if (!res.IsSuccessStatusCode)
         {
             throw new LaunchException(string.Create(CultureInfo.InvariantCulture, $"MiniMax quota: HTTP {(int)res.StatusCode}"));
@@ -145,8 +146,9 @@ internal static class Quota
         using HttpRequestMessage req = new(HttpMethod.Get, baseUrl);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Runtimes.ProviderKey(p));
         req.Headers.AcceptLanguage.ParseAdd("en-US");
-        using HttpResponseMessage res = http.Send(req);
-        string body = new StreamReader(res.Content.ReadAsStream()).ReadToEnd();
+        using HttpResponseMessage res = http.Send(req, CancellationToken.None);
+        using StreamReader reader = new(res.Content.ReadAsStream(CancellationToken.None));
+        string body = reader.ReadToEnd();
         if (!res.IsSuccessStatusCode)
         {
             throw new LaunchException(string.Create(CultureInfo.InvariantCulture, $"z.ai quota: HTTP {(int)res.StatusCode}"));
