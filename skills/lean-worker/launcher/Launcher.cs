@@ -45,7 +45,7 @@ internal static class Launcher
                 throw new LaunchException($"--continue-from needs a finished run dir (summary.json + task.md): {o.ContinueFrom}");
             }
 
-            prevSummary = Json.ParseLenient(await File.ReadAllTextAsync(prevSummaryPath).ConfigureAwait(false)).AsObject();
+            prevSummary = Json.ParseLenient(await File.ReadAllTextAsync(prevSummaryPath, CancellationToken.None).ConfigureAwait(false)).AsObject();
         }
         JsonObject? profile = null;
         string? profileName = o.Profile ?? Json.Str(prevSummary, "profile");
@@ -53,7 +53,7 @@ internal static class Launcher
         if (File.Exists(profilesPath))
         {
             JsonObject doc;
-            try { doc = Json.ParseLenient(await File.ReadAllTextAsync(profilesPath).ConfigureAwait(false)).AsObject(); }
+            try { doc = Json.ParseLenient(await File.ReadAllTextAsync(profilesPath, CancellationToken.None).ConfigureAwait(false)).AsObject(); }
             catch (Exception ex) { throw new LaunchException($"profiles.json is not valid JSON: {ex.Message}"); }
             profileName ??= Json.Str(doc, "defaultProfile");
             if (profileName is not null)
@@ -154,7 +154,7 @@ internal static class Launcher
         }
         // An API key: the environment, or an apiKeyHelper in --claude-settings. Any other settings file is not a key.
         bool hasKey = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"))
-                     || (o.ClaudeSettings is not null && Json.ParseLenient(await File.ReadAllTextAsync(o.ClaudeSettings).ConfigureAwait(false))["apiKeyHelper"] is not null);
+                     || (o.ClaudeSettings is not null && Json.ParseLenient(await File.ReadAllTextAsync(o.ClaudeSettings, CancellationToken.None).ConfigureAwait(false))["apiKeyHelper"] is not null);
 
         // ---------- pick the model: the first in the chain with quota headroom ----------
         string provider = string.Empty;
@@ -272,14 +272,14 @@ internal static class Launcher
         if (o.ContinueFrom is not null)
         {
             // Fresh worker, not a resumed session: the original task plus the previous worker's report.
-            string prevTask = await File.ReadAllTextAsync(Path.Combine(o.ContinueFrom, "task.md"), Json.Utf8).ConfigureAwait(false);
+            string prevTask = await File.ReadAllTextAsync(Path.Combine(o.ContinueFrom, "task.md"), Json.Utf8, CancellationToken.None).ConfigureAwait(false);
             int cut = prevTask.IndexOf(ContinuationHeading, StringComparison.Ordinal);
             if (cut >= 0)
             {
                 prevTask = prevTask[..cut];
             }
 
-            string prevReport = File.Exists(Path.Combine(o.ContinueFrom, "report.md")) ? (await File.ReadAllTextAsync(Path.Combine(o.ContinueFrom, "report.md"), Json.Utf8).ConfigureAwait(false)).Trim() : string.Empty;
+            string prevReport = File.Exists(Path.Combine(o.ContinueFrom, "report.md")) ? (await File.ReadAllTextAsync(Path.Combine(o.ContinueFrom, "report.md"), Json.Utf8, CancellationToken.None).ConfigureAwait(false)).Trim() : string.Empty;
             string nl = Environment.NewLine;
             taskText = prevTask.TrimEnd() + nl + nl + ContinuationHeading + nl + nl +
                        $"A previous worker on this task stopped before finishing (status: {Json.Str(prevSummary, "status")}). Its report is below. " +
@@ -290,14 +290,14 @@ internal static class Launcher
         else
         {
             string taskPath = Path.GetFullPath(o.TaskFile!);
-            taskText = await File.ReadAllTextAsync(taskPath, Json.Utf8).ConfigureAwait(false);
+            taskText = await File.ReadAllTextAsync(taskPath, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
             name = o.Name ?? new DirectoryInfo(Path.GetDirectoryName(taskPath)!).Name;
         }
         string safeName = new([.. name.Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' ? c : '-')]);
         DateTimeOffset started = DateTimeOffset.Now;
         string runDir = Path.Combine(runsRoot, "runs", string.Create(CultureInfo.InvariantCulture, $"{started:yyyyMMdd-HHmmss}-{safeName}"));
         _ = Directory.CreateDirectory(runDir);
-        await File.WriteAllTextAsync(Path.Combine(runDir, "task.md"), taskText, Json.Utf8).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(runDir, "task.md"), taskText, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
 
         // The worker's system notes = project notes + per-task system file. The path passed to the worker is
         // content-addressed, so it is the same in every run with identical content: opencode prints the file
@@ -306,12 +306,12 @@ internal static class Launcher
         string projectNotes = Path.Combine(runsRoot, "project.md");
         if (!o.NoProjectNotes && File.Exists(projectNotes))
         {
-            parts.Add(await File.ReadAllTextAsync(projectNotes, Json.Utf8).ConfigureAwait(false));
+            parts.Add(await File.ReadAllTextAsync(projectNotes, Json.Utf8, CancellationToken.None).ConfigureAwait(false));
         }
 
         if (o.SystemFile is not null)
         {
-            parts.Add(await File.ReadAllTextAsync(o.SystemFile, Json.Utf8).ConfigureAwait(false));
+            parts.Add(await File.ReadAllTextAsync(o.SystemFile, Json.Utf8, CancellationToken.None).ConfigureAwait(false));
         }
 
         string? runSystem = null;
@@ -321,7 +321,7 @@ internal static class Launcher
             string sha12 = Sha12(content);
             runSystem = Path.GetFullPath(Path.Combine(runsRoot, "system", $"{sha12}.md"));
             AtomicWrite(runSystem, content);
-            await File.WriteAllTextAsync(Path.Combine(runDir, "system.md"), content, Json.Utf8).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(runDir, "system.md"), content, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
         }
 
         // ---------- run ----------
@@ -329,7 +329,7 @@ internal static class Launcher
             mcpConfig, runSystem, o.ReplaceSystemPrompt, mode, cacheTtl, o.KeepClaudeMd, o.KeepMemory, keepHooks,
             !o.NoUserEnv, o.ClaudeSettings, providerInfo);
         Prepared prepared = runtime.Prepare(spec);
-        await File.WriteAllTextAsync(Path.Combine(runDir, "command.txt"), prepared.CommandText, Json.Utf8).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(runDir, "command.txt"), prepared.CommandText, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
 
         WriteScope.Snapshot? treeBefore = await WriteScope.TakeAsync(Directory.GetCurrentDirectory(), runsRoot).ConfigureAwait(false);
         Meter meter = new(prices, provider, runDir, budget, wrapUp ? wrapUpAt : null, Meter.HandoffInstruction);
@@ -414,7 +414,7 @@ internal static class Launcher
             firstCallCacheReadShare = Math.Round((double)firstCall.CacheRead / firstCall.Context, 3, MidpointRounding.ToEven);
         }
 
-        int hookChecks = File.Exists(Path.Combine(runDir, "hook.log")) ? File.ReadLines(Path.Combine(runDir, "hook.log")).Count() : 0;
+        int hookChecks = File.Exists(Path.Combine(runDir, "hook.log")) ? await CountLinesAsync(Path.Combine(runDir, "hook.log")).ConfigureAwait(false) : 0;
         string? next = status is "wrapped-up" or "success" ? null : NextInChain(chain, provider, model);
 
         JsonObject summary = new()
@@ -471,9 +471,9 @@ internal static class Launcher
             ["quota_used_pct"] = QuotaDelta(quotaBefore, quotaAfter),
             ["notes"] = new JsonArray([.. notes.Select(n => (JsonNode)n)]),
         };
-        await File.WriteAllTextAsync(Path.Combine(runDir, "summary.json"), summary.ToJsonString(Json.Indented), Json.Utf8).ConfigureAwait(false);
-        await File.WriteAllTextAsync(Path.Combine(runDir, "report.md"), report, Json.Utf8).ConfigureAwait(false);
-        await File.AppendAllTextAsync(Path.Combine(runsRoot, "runs.jsonl"), summary.ToJsonString() + Environment.NewLine, Json.Utf8).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(runDir, "summary.json"), summary.ToJsonString(Json.Indented), Json.Utf8, CancellationToken.None).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(runDir, "report.md"), report, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
+        await File.AppendAllTextAsync(Path.Combine(runsRoot, "runs.jsonl"), summary.ToJsonString() + Environment.NewLine, Json.Utf8, CancellationToken.None).ConfigureAwait(false);
 
         // ---------- print ----------
         CultureInfo ic = CultureInfo.InvariantCulture;
@@ -548,9 +548,11 @@ internal static class Launcher
             if (fi.Exists && fi.Length > 0)
             {
                 await w.WriteLineAsync("--- stderr (first 40 lines) ---").ConfigureAwait(false);
-                foreach (string l in File.ReadLines(stderrPath, Json.Utf8).Take(40))
+                int stderrLines = 0;
+                await foreach (string l in File.ReadLinesAsync(stderrPath, Json.Utf8, CancellationToken.None).ConfigureAwait(false))
                 {
-                    w.WriteLine(l);
+                    await w.WriteLineAsync(l).ConfigureAwait(false);
+                    if (++stderrLines >= 40) { break; }
                 }
             }
         }
@@ -599,6 +601,7 @@ internal static class Launcher
     /// <summary>
     /// Runs the worker, handing every stdout line to onLine; onLine returns true to stop the worker (hard cap).
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Any metering failure must stop the worker (fail closed).")]
     private static async Task<(int ExitCode, bool TimedOut, bool CapKilled)> RunWorkerAsync(Prepared prep, string stdin,
         string streamPath, string stderrPath, int timeoutMinutes, Func<string, bool> record, Func<string, bool> onLine)
     {
@@ -638,19 +641,20 @@ internal static class Launcher
         TaskCompletionSource errDone = new();
         bool capKilled = false;
         bool closed = false;
+        object gate = new();
         p.OutputDataReceived += (_, e) =>
         {
             if (e.Data is null) { _ = outDone.TrySetResult(); return; }
             bool stop;
             try
             {
-                lock (stream) { if (closed) { return; } if (record(e.Data)) { stream.WriteLine(e.Data); stream.Flush(); } }
+                lock (gate) { if (closed) { return; } if (record(e.Data)) { stream.WriteLine(e.Data); stream.Flush(); } }
                 stop = onLine(e.Data);
             }
             catch (Exception ex)
             {
                 // Metering broke: fail closed rather than let the worker spend unmetered.
-                lock (stream)
+                lock (gate)
                 {
                     if (!closed)
                     {
@@ -673,7 +677,7 @@ internal static class Launcher
             }
             else
             {
-                lock (stream) { if (!closed) { stderr.WriteLine(e.Data); } }
+                lock (gate) { if (!closed) { stderr.WriteLine(e.Data); } }
             }
         };
         p.BeginOutputReadLine();
@@ -685,10 +689,10 @@ internal static class Launcher
         if (timedOut)
         {
             try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            await p.WaitForExitAsync().ConfigureAwait(false);
+            await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        Task.WaitAll([outDone.Task, errDone.Task], TimeSpan.FromSeconds(30));
-        lock (stream)
+        _ = await Task.WhenAny(Task.WhenAll(outDone.Task, errDone.Task), Task.Delay(TimeSpan.FromSeconds(30), TimeProvider.System, CancellationToken.None)).ConfigureAwait(false);
+        lock (gate)
         {
             closed = true;
         }
@@ -723,6 +727,16 @@ internal static class Launcher
         return Convert.ToHexString(hash, 0, 6).ToLowerInvariant();
     }
 
+    private static async Task<int> CountLinesAsync(string path)
+    {
+        int n = 0;
+        await foreach (string _ in File.ReadLinesAsync(path, CancellationToken.None).ConfigureAwait(false))
+        {
+            n++;
+        }
+        return n;
+    }
+
     /// <summary>
     /// Writes <paramref name="content"/> to <paramref name="path"/> atomically (temp + move), only if the file is absent.
     /// </summary>
@@ -741,6 +755,6 @@ internal static class Launcher
             try { File.Move(temp, path); }
             catch (IOException) { /* lost the race; the other writer's content has the same hash */ }
         }
-        finally { try { File.Delete(temp); } catch { } }
+        finally { try { File.Delete(temp); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
     }
 }
