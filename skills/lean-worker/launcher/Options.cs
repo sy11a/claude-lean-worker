@@ -68,8 +68,8 @@ internal sealed class Options
 
     public static Options Parse(string[] args)
     {
-        var o = new Options();
-        for (var i = 0; i < args.Length; i++)
+        Options o = new();
+        for (int i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new LaunchException($"{args[i]} needs a value");
             switch (args[i])
@@ -83,7 +83,7 @@ internal sealed class Options
                 case "--model": o.Model = Next(); break;
                 case "--effort": o.Effort = Next(); break;
                 case "--variant": o.Variant = Next(); break;
-                case "--tools": o.Tools = Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); break;
+                case "--tools": o.Tools = [.. Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]; break;
                 case "--allow": o.AllowedTools.Add(Next()); break;
                 case "--write-scope": o.WriteScope.Add(Next()); break;
                 case "--mcp-config": o.McpConfig = Next(); break;

@@ -7,7 +7,7 @@ namespace LeanWorker;
 
 internal static class Json
 {
-    public static readonly UTF8Encoding Utf8 = new(false);
+    public static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
     public static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     private static readonly JsonDocumentOptions Lenient = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
@@ -17,17 +17,27 @@ internal static class Json
 
     public static JsonObject? TryParseObject(string line)
     {
-        if (line.Length == 0 || line[0] != '{') return null;
+        if (line.Length == 0 || line[0] != '{')
+        {
+            return null;
+        }
+
         try { return JsonNode.Parse(line) as JsonObject; } catch (JsonException) { return null; }
     }
 
     /// <summary>Deep merge: objects merge key by key, everything else (arrays included) is replaced.</summary>
     public static void MergeInto(JsonObject target, JsonObject source)
     {
-        foreach (var (key, value) in source)
+        foreach ((string? key, JsonNode? value) in source)
         {
-            if (value is JsonObject src && target[key] is JsonObject dst) MergeInto(dst, src);
-            else target[key] = value?.DeepClone();
+            if (value is JsonObject src && target[key] is JsonObject dst)
+            {
+                MergeInto(dst, src);
+            }
+            else
+            {
+                target[key] = value?.DeepClone();
+            }
         }
     }
 

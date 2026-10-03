@@ -2,6 +2,7 @@
 // the price book, writes <run>/wrapup.json once spend passes the wrap-up threshold (the runtime's pre-tool
 // hook then denies every tool call), and reports when the hard cap is reached so the launcher can stop the worker.
 
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace LeanWorker;
@@ -9,7 +10,7 @@ namespace LeanWorker;
 internal sealed class Meter(PriceBook prices, string provider, string runDir, decimal budget, decimal? wrapUpAt, string handoffText)
 {
     private readonly object _lock = new();
-    private readonly Dictionary<string, (Usage Usage, decimal Cost)> _calls = new();
+    private readonly Dictionary<string, (Usage Usage, decimal Cost)> _calls = [];
     private readonly List<string> _order = [];
 
     public decimal Spent { get; private set; }
@@ -30,22 +31,37 @@ internal sealed class Meter(PriceBook prices, string provider, string runDir, de
             catch (LaunchException ex)
             {
                 // The model was checked before launch; one the stream reports on top of it must still count.
-                var dearest = prices.Dearest();
-                if (dearest is null) throw;
+                ModelPrice? dearest = prices.Dearest();
+                if (dearest is null)
+                {
+                    throw;
+                }
+
                 price = dearest;
                 note = $"{ex.Message}; priced as the dearest model to keep the budget safe";
             }
-            if (note is not null && !Notes.Contains(note)) Notes.Add(note);
-            var cost = price.Cost(u);
-            if (_calls.TryGetValue(u.Id, out var prev)) Spent -= prev.Cost;
-            else _order.Add(u.Id);
+            if (note is not null && !Notes.Contains(note))
+            {
+                Notes.Add(note);
+            }
+
+            decimal cost = price.Cost(u);
+            if (_calls.TryGetValue(u.Id, out (Usage Usage, decimal Cost) prev))
+            {
+                Spent -= prev.Cost;
+            }
+            else
+            {
+                _order.Add(u.Id);
+            }
+
             _calls[u.Id] = (u, cost);
             Spent += cost;
 
             if (wrapUpAt is { } share && !WrappedUp && Spent >= budget * share)
             {
                 WrappedUp = true;
-                var reason = $"Budget nearly spent (about ${Spent:0.####} of ${budget:0.####}). Tool calls are now blocked. " + handoffText;
+                string reason = string.Create(CultureInfo.InvariantCulture, $"Budget nearly spent (about ${Spent:0.####} of ${budget:0.####}). Tool calls are now blocked. ") + handoffText;
                 File.WriteAllText(WrapUpFile, new JsonObject
                 {
                     ["at"] = DateTimeOffset.Now.ToString("o"),
@@ -66,7 +82,10 @@ internal sealed class Meter(PriceBook prices, string provider, string runDir, de
 
     public List<Usage> Calls()
     {
-        lock (_lock) return _order.Select(id => _calls[id].Usage).ToList();
+        lock (_lock)
+        {
+            return [.. _order.Select(id => _calls[id].Usage)];
+        }
     }
 
     public const string HandoffInstruction =
