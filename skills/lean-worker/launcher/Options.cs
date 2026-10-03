@@ -57,13 +57,35 @@ internal sealed class Options
           prices                     the merged price book: sources and each entry's date
         """;
 
-    public string? TaskFile, Profile, SystemFile, Name, Model, Effort, Variant, McpConfig, PermissionMode, RunsRoot,
-                   ClaudeSettings, CacheTtl, ContinueFrom, Runtime, PricesFile;
+    public string? TaskFile;
+    public string? Profile;
+    public string? SystemFile;
+    public string? Name;
+    public string? Model;
+    public string? Effort;
+    public string? Variant;
+    public string? McpConfig;
+    public string? PermissionMode;
+    public string? RunsRoot;
+    public string? ClaudeSettings;
+    public string? CacheTtl;
+    public string? ContinueFrom;
+    public string? Runtime;
+    public string? PricesFile;
     public List<string>? Tools;
-    public List<string> AllowedTools = [], WriteScope = [];
-    public decimal? MaxBudgetUsd, WrapUpAt;
-    public int TimeoutMinutes = 60, ReportMaxChars = 6000;
-    public bool NoProjectNotes, ReplaceSystemPrompt, KeepClaudeMd, KeepMemory, KeepHooks, NoUserEnv, Help;
+    public List<string> AllowedTools = [];
+    public List<string> WriteScope = [];
+    public decimal? MaxBudgetUsd;
+    public decimal? WrapUpAt;
+    public int TimeoutMinutes = 60;
+    public int ReportMaxChars = 6000;
+    public bool NoProjectNotes;
+    public bool ReplaceSystemPrompt;
+    public bool KeepClaudeMd;
+    public bool KeepMemory;
+    public bool KeepHooks;
+    public bool NoUserEnv;
+    public bool Help;
     public string Mode = "auto";
 
     public static Options Parse(string[] args)
@@ -74,38 +96,38 @@ internal sealed class Options
             string Next() => i + 1 < args.Length ? args[++i] : throw new LaunchException($"{args[i]} needs a value");
             switch (args[i])
             {
-                case "--task": o.TaskFile = Next(); break;
-                case "--continue-from": o.ContinueFrom = Next(); break;
-                case "--profile": o.Profile = Next(); break;
-                case "--system": o.SystemFile = Next(); break;
-                case "--name": o.Name = Next(); break;
-                case "--runtime": o.Runtime = Next(); break;
-                case "--model": o.Model = Next(); break;
-                case "--effort": o.Effort = Next(); break;
-                case "--variant": o.Variant = Next(); break;
-                case "--tools": o.Tools = [.. Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]; break;
-                case "--allow": o.AllowedTools.Add(Next()); break;
-                case "--write-scope": o.WriteScope.Add(Next()); break;
-                case "--mcp-config": o.McpConfig = Next(); break;
-                case "--max-budget-usd": o.MaxBudgetUsd = decimal.Parse(Next(), CultureInfo.InvariantCulture); break;
-                case "--wrap-up-at": o.WrapUpAt = decimal.Parse(Next(), CultureInfo.InvariantCulture); break;
-                case "--prices": o.PricesFile = Next(); break;
-                case "--permission-mode": o.PermissionMode = Next(); break;
-                case "--runs-root": o.RunsRoot = Next(); break;
-                case "--claude-settings": o.ClaudeSettings = Next(); break;
-                case "--timeout-minutes": o.TimeoutMinutes = int.Parse(Next(), CultureInfo.InvariantCulture); break;
-                case "--report-max-chars": o.ReportMaxChars = int.Parse(Next(), CultureInfo.InvariantCulture); break;
-                case "--no-project-notes": o.NoProjectNotes = true; break;
-                case "--replace-system-prompt": o.ReplaceSystemPrompt = true; break;
-                case "--no-bare": o.Mode = "lean"; break;
-                case "--mode": o.Mode = Next(); break;
-                case "--keep-claude-md": o.KeepClaudeMd = true; break;
-                case "--keep-memory": o.KeepMemory = true; break;
-                case "--keep-hooks": o.KeepHooks = true; break;
-                case "--no-user-env": o.NoUserEnv = true; break;
-                case "--cache-ttl": o.CacheTtl = Next(); break;
+                case "--task": { o.TaskFile = Next(); break; }
+                case "--continue-from": { o.ContinueFrom = Next(); break; }
+                case "--profile": { o.Profile = Next(); break; }
+                case "--system": { o.SystemFile = Next(); break; }
+                case "--name": { o.Name = Next(); break; }
+                case "--runtime": { o.Runtime = Next(); break; }
+                case "--model": { o.Model = Next(); break; }
+                case "--effort": { o.Effort = Next(); break; }
+                case "--variant": { o.Variant = Next(); break; }
+                case "--tools": { o.Tools = [.. Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]; break; }
+                case "--allow": { o.AllowedTools.Add(Next()); break; }
+                case "--write-scope": { o.WriteScope.Add(Next()); break; }
+                case "--mcp-config": { o.McpConfig = Next(); break; }
+                case "--max-budget-usd": { o.MaxBudgetUsd = decimal.Parse(Next(), CultureInfo.InvariantCulture); break; }
+                case "--wrap-up-at": { o.WrapUpAt = decimal.Parse(Next(), CultureInfo.InvariantCulture); break; }
+                case "--prices": { o.PricesFile = Next(); break; }
+                case "--permission-mode": { o.PermissionMode = Next(); break; }
+                case "--runs-root": { o.RunsRoot = Next(); break; }
+                case "--claude-settings": { o.ClaudeSettings = Next(); break; }
+                case "--timeout-minutes": { o.TimeoutMinutes = int.Parse(Next(), CultureInfo.InvariantCulture); break; }
+                case "--report-max-chars": { o.ReportMaxChars = int.Parse(Next(), CultureInfo.InvariantCulture); break; }
+                case "--no-project-notes": { o.NoProjectNotes = true; break; }
+                case "--replace-system-prompt": { o.ReplaceSystemPrompt = true; break; }
+                case "--no-bare": { o.Mode = "lean"; break; }
+                case "--mode": { o.Mode = Next(); break; }
+                case "--keep-claude-md": { o.KeepClaudeMd = true; break; }
+                case "--keep-memory": { o.KeepMemory = true; break; }
+                case "--keep-hooks": { o.KeepHooks = true; break; }
+                case "--no-user-env": { o.NoUserEnv = true; break; }
+                case "--cache-ttl": { o.CacheTtl = Next(); break; }
                 case "--no-hooks": break; // hooks are off by default; accepted for compatibility
-                case "-h" or "--help": o.Help = true; break;
+                case "-h" or "--help": { o.Help = true; break; }
                 default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");
             }
         }
