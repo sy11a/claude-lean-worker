@@ -12,26 +12,7 @@ internal sealed class ClaudeRuntime : IRuntime
     public Prepared Prepare(RunSpec s)
     {
         string claude = Launcher.FindOnPath("claude") ?? throw new LaunchException("'claude' is not on PATH.");
-        Dictionary<string, string?> env = new(StringComparer.Ordinal);
-        if (s.CacheTtl is not "default")
-        {
-            env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = s.CacheTtl;
-        }
-
-        if (s.Provider is not "anthropic")
-        {
-            // Another provider's Anthropic-compatible endpoint. The key goes through the environment, never to disk.
-            string url = s.ProviderInfo.AnthropicBaseUrl
-                      ?? throw new LaunchException($"provider '{s.Provider}' has no anthropicBaseUrl in prices.json; use --runtime opencode");
-            env["ANTHROPIC_BASE_URL"] = url;
-            env["ANTHROPIC_AUTH_TOKEN"] = Runtimes.ProviderKey(s.ProviderInfo);
-            env["ANTHROPIC_API_KEY"] = null;
-            foreach (string? tier in new[] { "HAIKU", "SONNET", "OPUS" })
-            {
-                env[$"ANTHROPIC_DEFAULT_{tier}_MODEL"] = s.Model;
-            }
-        }
-
+        Dictionary<string, string?> env = BaseEnv(s);
         List<string> a = ["-p"];
         if (s.Mode is "bare")
         {
@@ -52,65 +33,7 @@ internal sealed class ClaudeRuntime : IRuntime
         }
         if (s.Mode is "lean")
         {
-            // Without --bare Claude Code would load CLAUDE.md / AGENTS.md / rules, the user's settings, hooks and
-            // plugins. --setting-sources "" loads no user/project/local settings at all (managed settings and
-            // --settings still apply), so personal hooks and plugins stay out while the injected hook runs.
-            JsonObject settings = s.ClaudeSettings is not null
-                ? Json.ParseLenient(File.ReadAllText(s.ClaudeSettings)).AsObject()
-                : [];
-            if (!s.KeepClaudeMd)
-            {
-                settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
-            }
-
-            if (!s.KeepMemory)
-            {
-                settings["autoMemoryEnabled"] = false;
-            }
-
-            settings["outputStyle"] = "default"; // a personal output style would otherwise shape the worker's prompt
-            if (!s.KeepHooks && s.KeepUserEnv && UserSettingsEnv() is { } userEnv)
-            {
-                // Settings sources are off, so carry the user's env block (proxies, for example) over explicitly,
-                // through the process environment: it may hold tokens, which must not land in the run dir.
-                // What the launcher sets itself (another provider's endpoint and key) wins.
-                foreach ((string? k, JsonNode? v) in userEnv)
-                {
-                    if (!env.ContainsKey(k) && v is JsonValue jv && jv.TryGetValue(out string? value))
-                    {
-                        env[k] = value;
-                    }
-                }
-            }
-            if (s.WrapUp)
-            {
-                if (settings["hooks"] is not JsonObject hooks)
-                {
-                    JsonObject n = [];
-                    settings["hooks"] = n;
-                    hooks = n;
-                }
-
-                if (hooks["PreToolUse"] is not JsonArray pre)
-                {
-                    JsonArray m = [];
-                    hooks["PreToolUse"] = m;
-                    pre = m;
-                }
-
-                pre.Add(new JsonObject
-                {
-                    ["matcher"] = ".*",
-                    ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = Runtimes.HookCommand(s.RunDir) }),
-                });
-            }
-            string settingsPath = Path.GetFullPath(Path.Combine(s.RunDir, "settings.json"));
-            File.WriteAllText(settingsPath, settings.ToJsonString(Json.Indented), Json.Utf8);
-            a.AddRange(["--settings", settingsPath, "--disable-slash-commands"]);
-            if (!s.KeepHooks)
-            {
-                a.AddRange(["--setting-sources", string.Empty]);
-            }
+            AddLeanSettings(s, env, a);
         }
         else if (s.ClaudeSettings is not null)
         {
@@ -133,6 +56,106 @@ internal sealed class ClaudeRuntime : IRuntime
         // repeat the count from the start of the message, which undercounts output.
         a.AddRange(["--no-session-persistence", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
         return new Prepared(claude, a, env, "claude " + string.Join(' ', a.Select(arg => Runtimes.Quote(arg))));
+    }
+
+    private static Dictionary<string, string?> BaseEnv(RunSpec s)
+    {
+        Dictionary<string, string?> env = new(StringComparer.Ordinal);
+        if (s.CacheTtl is not "default")
+        {
+            env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = s.CacheTtl;
+        }
+
+        if (s.Provider is not "anthropic")
+        {
+            // Another provider's Anthropic-compatible endpoint. The key goes through the environment, never to disk.
+            string url = s.ProviderInfo.AnthropicBaseUrl
+                      ?? throw new LaunchException($"provider '{s.Provider}' has no anthropicBaseUrl in prices.json; use --runtime opencode");
+            env["ANTHROPIC_BASE_URL"] = url;
+            env["ANTHROPIC_AUTH_TOKEN"] = Runtimes.ProviderKey(s.ProviderInfo);
+            env["ANTHROPIC_API_KEY"] = null;
+            foreach (string? tier in new[] { "HAIKU", "SONNET", "OPUS" })
+            {
+                env[$"ANTHROPIC_DEFAULT_{tier}_MODEL"] = s.Model;
+            }
+        }
+
+        return env;
+    }
+
+    private static void AddLeanSettings(RunSpec s, Dictionary<string, string?> env, List<string> a)
+    {
+        // Without --bare Claude Code would load CLAUDE.md / AGENTS.md / rules, the user's settings, hooks and
+        // plugins. --setting-sources "" loads no user/project/local settings at all (managed settings and
+        // --settings still apply), so personal hooks and plugins stay out while the injected hook runs.
+        JsonObject settings = s.ClaudeSettings is not null
+            ? Json.ParseLenient(File.ReadAllText(s.ClaudeSettings)).AsObject()
+            : [];
+        if (!s.KeepClaudeMd)
+        {
+            settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
+        }
+
+        if (!s.KeepMemory)
+        {
+            settings["autoMemoryEnabled"] = false;
+        }
+
+        settings["outputStyle"] = "default"; // a personal output style would otherwise shape the worker's prompt
+        if (!s.KeepHooks && s.KeepUserEnv && UserSettingsEnv() is { } userEnv)
+        {
+            // Settings sources are off, so carry the user's env block (proxies, for example) over explicitly,
+            // through the process environment: it may hold tokens, which must not land in the run dir.
+            // What the launcher sets itself (another provider's endpoint and key) wins.
+            CopyUserEnv(userEnv, env);
+        }
+        if (s.WrapUp)
+        {
+            AddWrapUpHook(settings, s.RunDir);
+        }
+        string settingsPath = Path.GetFullPath(Path.Combine(s.RunDir, "settings.json"));
+        File.WriteAllText(settingsPath, settings.ToJsonString(Json.Indented), Json.Utf8);
+        a.AddRange(["--settings", settingsPath, "--disable-slash-commands"]);
+        if (s.KeepHooks)
+        {
+            return;
+        }
+
+        a.AddRange(["--setting-sources", string.Empty]);
+    }
+
+    private static void CopyUserEnv(JsonObject userEnv, Dictionary<string, string?> env)
+    {
+        foreach ((string? k, JsonNode? v) in userEnv)
+        {
+            if (!env.ContainsKey(k) && v is JsonValue jv && jv.TryGetValue(out string? value))
+            {
+                env[k] = value;
+            }
+        }
+    }
+
+    private static void AddWrapUpHook(JsonObject settings, string runDir)
+    {
+        if (settings["hooks"] is not JsonObject hooks)
+        {
+            JsonObject n = [];
+            settings["hooks"] = n;
+            hooks = n;
+        }
+
+        if (hooks["PreToolUse"] is not JsonArray pre)
+        {
+            JsonArray m = [];
+            hooks["PreToolUse"] = m;
+            pre = m;
+        }
+
+        pre.Add(new JsonObject
+        {
+            ["matcher"] = ".*",
+            ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = Runtimes.HookCommand(runDir) }),
+        });
     }
 
     private static JsonObject? UserSettingsEnv()
