@@ -7,42 +7,77 @@ namespace LeanWorker;
 
 internal static class Json
 {
-    public static readonly UTF8Encoding Utf8 = new(false);
+    public static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
     public static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
-    private static readonly JsonDocumentOptions Lenient = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+    private static readonly JsonDocumentOptions _lenient = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
-    /// <summary>Parses JSON that may contain comments and trailing commas (opencode.jsonc, hand-edited prices).</summary>
+    /// <summary>
+    /// Parses JSON that may contain comments and trailing commas (opencode.jsonc, hand-edited prices).
+    /// </summary>
     public static JsonNode ParseLenient(string text) =>
-        JsonNode.Parse(text, documentOptions: Lenient) ?? throw new JsonException("empty document");
+        JsonNode.Parse(text, documentOptions: _lenient) ?? throw new JsonException("empty document");
 
     public static JsonObject? TryParseObject(string line)
     {
-        if (line.Length == 0 || line[0] != '{') return null;
+        if (line.Length is 0 || line[0] is not '{')
+        {
+            return null;
+        }
+
         try { return JsonNode.Parse(line) as JsonObject; } catch (JsonException) { return null; }
     }
 
-    /// <summary>Deep merge: objects merge key by key, everything else (arrays included) is replaced.</summary>
+    /// <summary>
+    /// Deep merge: objects merge key by key, everything else (arrays included) is replaced.
+    /// </summary>
     public static void MergeInto(JsonObject target, JsonObject source)
     {
-        foreach (var (key, value) in source)
+        foreach ((string? key, JsonNode? value) in source)
         {
-            if (value is JsonObject src && target[key] is JsonObject dst) MergeInto(dst, src);
-            else target[key] = value?.DeepClone();
+            if (value is JsonObject src && target[key] is JsonObject dst)
+            {
+                MergeInto(dst, src);
+            }
+            else
+            {
+                target[key] = value?.DeepClone();
+            }
         }
     }
 
     public static string? Str(JsonObject? o, string key) => o?[key] is JsonValue v && v.TryGetValue(out string? s) ? s : null;
 
-    public static decimal? Dec(JsonObject? o, string key) => o?[key] is JsonValue v
-        ? v.TryGetValue(out decimal d) ? d : v.TryGetValue(out string? s) && decimal.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out d) ? d : null
-        : null;
+    public static decimal? Dec(JsonObject? o, string key)
+    {
+        if (o?[key] is not JsonValue v)
+        {
+            return null;
+        }
+
+        if (v.TryGetValue(out decimal d))
+        {
+            return d;
+        }
+
+        return v.TryGetValue(out string? s) && decimal.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out d) ? d : null;
+    }
 
     public static bool Bool(JsonObject? o, string key) => o?[key] is JsonValue v && v.TryGetValue(out bool b) && b;
 
-    public static long Num(JsonNode? n) => n is not JsonValue v ? 0
-        : v.TryGetValue(out long l) ? l
-        : v.TryGetValue(out double d) ? (long)d
-        : 0;
+    public static long Num(JsonNode? n)
+    {
+        if (n is not JsonValue v)
+        {
+            return 0;
+        }
+
+        if (v.TryGetValue(out long l))
+        {
+            return l;
+        }
+
+        return v.TryGetValue(out double d) ? (long)d : 0;
+    }
 
     public static List<string>? StrList(JsonObject? o, string key) =>
         o?[key] is JsonArray arr ? arr.Select(x => x?.GetValue<string>()).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).ToList() : null;

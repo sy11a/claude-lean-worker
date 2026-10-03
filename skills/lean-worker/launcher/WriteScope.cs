@@ -12,40 +12,64 @@ namespace LeanWorker;
 /// </summary>
 internal static class WriteScope
 {
-    /// <summary>The dirty files of a working tree: path relative to the repository root → content hash.</summary>
-    public sealed record Snapshot(string Root, Dictionary<string, string> Dirty);
+    /// <summary>
+    /// The dirty files of a working tree: path relative to the repository root → content hash.
+    /// </summary>
+    internal sealed record Snapshot(string Root, Dictionary<string, string> Dirty);
 
-    /// <summary>Null when <paramref name="cwd"/> is not inside a git working tree (or git is missing).</summary>
-    public static Snapshot? Take(string cwd, string? exclude = null)
+    /// <summary>
+    /// Null when <paramref name="cwd"/> is not inside a git working tree (or git is missing).
+    /// </summary>
+    public static async Task<Snapshot?> TakeAsync(string cwd, string? exclude = null)
     {
-        var root = Git(cwd, "rev-parse", "--show-toplevel")?.Trim();
-        if (string.IsNullOrEmpty(root)) return null;
-        var status = Git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all");
-        if (status is null) return null;
-        var skip = exclude is null ? null : Relative(root, exclude);
-        var dirty = new Dictionary<string, string>(StringComparer.Ordinal);
-        var entries = status.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-        for (var i = 0; i < entries.Length; i++)
+        string? root = (await GitAsync(cwd, "rev-parse", "--show-toplevel").ConfigureAwait(false))?.Trim();
+        if (string.IsNullOrEmpty(root))
         {
-            var e = entries[i];
-            if (e.Length < 4) continue;
-            // A rename or copy is followed by its source path; a renamed source no longer exists, so it reads as deleted.
-            var source = e[0] is 'R' or 'C' && i + 1 < entries.Length ? entries[++i] : null;
-            foreach (var path in e[0] == 'R' && source is not null ? [e[3..], source] : new[] { e[3..] })
+            return null;
+        }
+
+        string? status = await GitAsync(root, "status", "--porcelain=v1", "-z", "--untracked-files=all").ConfigureAwait(false);
+        if (status is null)
+        {
+            return null;
+        }
+
+        string? skip = exclude is null ? null : Relative(root, exclude);
+        Dictionary<string, string> dirty = new(StringComparer.Ordinal);
+        string[] entries = status.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            string e = entries[i];
+            if (e.Length < 4)
             {
-                if (skip is not null && (path == skip || path.StartsWith(skip + "/", StringComparison.Ordinal))) continue;
-                var full = Path.Combine(root, path);
-                dirty[path] = File.Exists(full) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(full))) : "-";
+                continue;
+            }
+            // A rename or copy is followed by its source path; a renamed source no longer exists, so it reads as deleted.
+            string? source = e[0] is 'R' or 'C' && i + 1 < entries.Length ? entries[++i] : null;
+            IEnumerable<string> paths = e[0] == 'R' && source is not null ? [e[3..], source] : new[] { e[3..] };
+            foreach (string path in paths)
+            {
+                if (skip is not null && (path == skip || path.StartsWith(skip + "/", StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+
+                string full = Path.Combine(root, path);
+                dirty[path] = File.Exists(full) ? Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(full, CancellationToken.None).ConfigureAwait(false))) : "-";
             }
         }
         return new Snapshot(root, dirty);
     }
 
-    /// <summary>Paths whose state differs between the two snapshots, in ordinal order.</summary>
-    public static List<string> Changed(Snapshot before, Snapshot after) =>
-        before.Dirty.Keys.Union(after.Dirty.Keys)
-            .Where(p => !before.Dirty.TryGetValue(p, out var a) || !after.Dirty.TryGetValue(p, out var b) || a != b)
-            .Order(StringComparer.Ordinal).ToList();
+    /// <summary>
+    /// Paths whose state differs between the two snapshots, in ordinal order.
+    /// </summary>
+    public static List<string> Changed(Snapshot before, Snapshot after)
+    {
+        return [.. before.Dirty.Keys.Union(after.Dirty.Keys, StringComparer.Ordinal)
+            .Where(p => !before.Dirty.TryGetValue(p, out string? a) || !after.Dirty.TryGetValue(p, out string? b) || a != b)
+            .Order(StringComparer.Ordinal),];
+    }
 
     /// <summary>
     /// Whether a repository-relative path is in the scope. Patterns are globs relative to the repository root:
@@ -56,45 +80,66 @@ internal static class WriteScope
 
     private static Regex ToRegex(string glob)
     {
-        var g = glob.Replace('\\', '/').TrimStart('/').TrimEnd('/');
-        if (g.StartsWith("./", StringComparison.Ordinal)) g = g[2..];
-        var sb = new StringBuilder("^");
-        for (var i = 0; i < g.Length; i++)
+        string g = glob.Replace('\\', '/').TrimStart('/').TrimEnd('/');
+        if (g.StartsWith("./", StringComparison.Ordinal))
         {
-            var c = g[i];
+            g = g[2..];
+        }
+
+        StringBuilder sb = new("^");
+        for (int i = 0; i < g.Length; i++)
+        {
+            char c = g[i];
             if (c == '*' && i + 1 < g.Length && g[i + 1] == '*')
             {
-                var slash = i + 2 < g.Length && g[i + 2] == '/';
-                sb.Append(slash ? "(?:.*/)?" : ".*");
+                bool slash = i + 2 < g.Length && g[i + 2] == '/';
+                _ = sb.Append(slash ? "(?:.*/)?" : ".*");
                 i += slash ? 2 : 1;
             }
-            else if (c == '*') sb.Append("[^/]*");
-            else if (c == '?') sb.Append("[^/]");
-            else sb.Append(Regex.Escape(c.ToString()));
+            else if (c == '*')
+            {
+                _ = sb.Append("[^/]*");
+            }
+            else if (c == '?')
+            {
+                _ = sb.Append("[^/]");
+            }
+            else
+            {
+                _ = sb.Append(Regex.Escape(c.ToString()));
+            }
         }
-        return new Regex(sb.Append("(?:/.*)?$").ToString(), RegexOptions.CultureInvariant);
+        return new Regex(sb.Append("(?:/.*)?$").ToString(), RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
     private static string? Relative(string root, string path)
     {
-        var rel = Path.GetRelativePath(root, Path.GetFullPath(path)).Replace('\\', '/');
+        string rel = Path.GetRelativePath(root, Path.GetFullPath(path)).Replace('\\', '/');
         return rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel) ? null : rel;
     }
 
-    private static string? Git(string dir, params string[] args)
+    private static async Task<string?> GitAsync(string dir, params string[] args)
     {
-        var psi = new ProcessStartInfo("git") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        ProcessStartInfo psi = new("git") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         psi.ArgumentList.Add("-C");
         psi.ArgumentList.Add(dir);
-        foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (string a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+
         try
         {
-            using var p = Process.Start(psi);
-            if (p is null) return null;
-            var output = p.StandardOutput.ReadToEndAsync();
-            _ = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(60_000)) { try { p.Kill(true); } catch (InvalidOperationException) { } return null; }
-            return p.ExitCode == 0 ? output.Result : null;
+            using Process? p = Process.Start(psi);
+            if (p is null)
+            {
+                return null;
+            }
+
+            Task<string> output = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            _ = p.StandardError.ReadToEndAsync(CancellationToken.None);
+            if (!p.WaitForExit(60_000)) { try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } return null; }
+            return p.ExitCode is 0 ? await output.ConfigureAwait(false) : null;
         }
         catch (System.ComponentModel.Win32Exception) { return null; } // git is not installed
     }

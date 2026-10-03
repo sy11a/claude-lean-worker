@@ -1,0 +1,257 @@
+// LeanWorker: runs one well-scoped task in a separate, minimal-context worker process (Claude Code `claude -p`
+// or opencode `opencode run`) and prints a compact report with token usage and cost.
+//
+// Settings resolve in this order: command-line option > profile in <runs-root>/profiles.json > built-in default.
+// Project notes (<runs-root>/project.md) are given to every worker unless --no-project-notes;
+// a per-task --system file is appended after them.
+//
+// Spend is metered live from the worker's stream with the price book (prices.json). Past the wrap-up share of the
+// budget a pre-tool hook blocks every tool call, so the worker's last message is a handoff; at the budget the
+// launcher stops the worker.
+//
+// Exit codes: 0 = worker finished without error, 1 = worker reported an error, 2 = launcher failed,
+// 3 = worker wrapped up near its budget and left a handoff (continue with --continue-from <run-dir>).
+
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
+
+namespace LeanWorker;
+
+internal static class Launcher
+{
+    internal static readonly string[] Efforts = ["low", "medium", "high", "xhigh", "max"];
+    internal static readonly string[] PermissionModes = ["acceptEdits", "dontAsk", "plan", "manual", "auto", "bypassPermissions"];
+    internal const string ContinuationHeading = "## Continuation (lean-worker)";
+    public const int RunSchemaVersion = 1;
+
+    public static async Task<int> RunAsync(Options o)
+    {
+        if (o.Help)
+        {
+            await Console.Out.WriteLineAsync(Options.Usage).ConfigureAwait(false);
+            return 0;
+        }
+
+        return await new LaunchRun(o).RunAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// metered | subscription. Anthropic's "auto" is a subscription when the worker uses the login, not a key.
+    /// </summary>
+    public static string Billing(Provider p, string runtime, bool hasKey)
+    {
+        return p.Billing switch
+        {
+            "auto" when runtime is "claude" => hasKey ? "metered" : "subscription",
+            "auto" => "metered",
+            var b => b,
+        };
+    }
+
+    internal static string? NextInChain(List<string> chain, string provider, string model)
+    {
+        int i = chain.FindIndex(c => PriceBook.Split(c) == (provider, model));
+        return i >= 0 && i + 1 < chain.Count ? chain[i + 1] : null;
+    }
+
+    internal static JsonObject? QuotaDelta(QuotaReading? before, QuotaReading? after)
+    {
+        if (before is null || after is null)
+        {
+            return null;
+        }
+
+        JsonObject d = [];
+        foreach (QuotaWindow w in after.Windows)
+        {
+            if (before.Windows.Find(b => b.Name == w.Name) is { } b)
+            {
+                d[w.Name] = w.Percent - b.Percent;
+            }
+        }
+
+        return d;
+    }
+
+    /// <summary>
+    /// Runs the worker, handing every stdout line to onLine; onLine returns true to stop the worker (hard cap).
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Any metering failure must stop the worker (fail closed).")]
+    internal static async Task<(int ExitCode, bool TimedOut, bool CapKilled)> RunWorkerAsync(Prepared prep, string stdin,
+        string streamPath, string stderrPath, int timeoutMinutes, Func<string, bool> record, Func<string, bool> onLine)
+    {
+        ProcessStartInfo psi = StartInfo(prep);
+        using Process p = Process.Start(psi) ?? throw new LaunchException($"could not start {prep.Executable}");
+        StreamWriter stream = new(streamPath, append: false, Json.Utf8);
+        await using ConfiguredAsyncDisposable streamDisposal = stream.ConfigureAwait(false);
+        StreamWriter stderr = new(stderrPath, append: false, Json.Utf8);
+        await using ConfiguredAsyncDisposable stderrDisposal = stderr.ConfigureAwait(false);
+        TaskCompletionSource outDone = new();
+        TaskCompletionSource errDone = new();
+        bool capKilled = false;
+        bool closed = false;
+        object gate = new();
+        p.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) { _ = outDone.TrySetResult(); return; }
+            bool stop;
+            try
+            {
+                stop = TryMeter(gate, ref closed, stream, record, onLine, e.Data);
+            }
+            catch (Exception ex)
+            {
+                // Metering broke: fail closed rather than let the worker spend unmetered.
+                FailClosed(gate, ref closed, stderrPath, ex);
+                stop = true;
+            }
+            if (!stop || capKilled) { return; }
+            capKilled = true;
+            KillQuietly(p);
+        };
+        p.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null)
+            {
+                _ = errDone.TrySetResult();
+            }
+            else
+            {
+                lock (gate) { if (!closed) { stderr.WriteLine(e.Data); } }
+            }
+        };
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
+        await p.StandardInput.WriteAsync(stdin).ConfigureAwait(false);
+        p.StandardInput.Close();
+        bool timedOut = await WaitForExitAsync(p, timeoutMinutes).ConfigureAwait(false);
+        _ = await Task.WhenAny(Task.WhenAll(outDone.Task, errDone.Task), Task.Delay(TimeSpan.FromSeconds(30), TimeProvider.System, CancellationToken.None)).ConfigureAwait(false);
+        lock (gate)
+        {
+            closed = true;
+        }
+        return (timedOut ? -1 : p.ExitCode, timedOut, capKilled);
+    }
+
+    private static ProcessStartInfo StartInfo(Prepared prep)
+    {
+        ProcessStartInfo psi = new()
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Json.Utf8,
+            StandardErrorEncoding = Json.Utf8,
+            FileName = prep.Executable,
+        };
+        foreach (string arg in prep.Args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+        foreach ((string? k, string? v) in prep.Env)
+        {
+            if (v is null)
+            {
+                _ = psi.Environment.Remove(k);
+            }
+            else
+            {
+                psi.Environment[k] = v;
+            }
+        }
+        return psi;
+    }
+
+    private static void KillQuietly(Process p)
+    {
+        try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    private static async Task<bool> WaitForExitAsync(Process p, int timeoutMinutes)
+    {
+        bool timedOut = !p.WaitForExit(TimeSpan.FromMinutes(timeoutMinutes));
+        if (timedOut)
+        {
+            KillQuietly(p);
+            await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        return timedOut;
+    }
+
+    private static bool TryMeter(object gate, ref bool closed, StreamWriter stream, Func<string, bool> record, Func<string, bool> onLine, string data)
+    {
+        lock (gate) { if (closed) { return false; } if (record(data)) { stream.WriteLine(data); stream.Flush(); } }
+        return onLine(data);
+    }
+
+    private static void FailClosed(object gate, ref bool closed, string stderrPath, Exception ex)
+    {
+        lock (gate)
+        {
+            if (!closed)
+            {
+                File.AppendAllText(stderrPath + ".launcher", $"metering failed, worker stopped: {ex}{Environment.NewLine}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The claude runtime reaches Anthropic and any provider with an Anthropic-compatible endpoint; others need opencode.
+    /// </summary>
+    internal static string DefaultRuntime(Provider p) => p.Name is "anthropic" || p.AnthropicBaseUrl is not null ? "claude" : "opencode";
+
+    public static string? FindOnPath(string command)
+    {
+        foreach (string dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string candidate = Path.Combine(dir.Trim('"'), command);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// First 12 hex chars of the SHA-256 of the UTF-8 bytes; the path is the same in every run of identical content.
+    /// </summary>
+    internal static string Sha12(string content)
+    {
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(Json.Utf8.GetBytes(content));
+        return Convert.ToHexString(hash, 0, 6).ToLowerInvariant();
+    }
+
+    internal static async Task<int> CountLinesAsync(string path)
+    {
+        int n = 0;
+        await foreach (string _ in File.ReadLinesAsync(path, CancellationToken.None).ConfigureAwait(false))
+        {
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Writes <paramref name="content"/> to <paramref name="path"/> atomically (temp + move), only if the file is absent.
+    /// </summary>
+    internal static void AtomicWrite(string path, string content)
+    {
+        if (File.Exists(path))
+        {
+            return;
+        }
+
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temp, content, Json.Utf8);
+            try { File.Move(temp, path); }
+            catch (IOException) { /* lost the race; the other writer's content has the same hash */ }
+        }
+        finally { try { File.Delete(temp); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
+    }
+}
