@@ -78,7 +78,7 @@ internal static partial class Commands
         PriceBook prices = PriceBook.Load(f.GetValueOrDefault("--runs-root") ?? ".lean-worker", f.GetValueOrDefault("--prices"));
         TimeSpan? maxAge = f.TryGetValue("--max-age", out string? s) && s is not null ? TimeSpan.FromSeconds(int.Parse(s, _ic)) : null;
         List<string> names = f.TryGetValue("--provider", out string? p) && p is not null ? [p] : prices.QuotaProviders();
-        if (names.Count == 0)
+        if (names.Count is 0)
         {
             throw new LaunchException("no provider in prices.json has a quota adapter");
         }
@@ -215,7 +215,7 @@ internal static partial class Commands
         using Process p = Process.Start(psi) ?? throw new LaunchException("could not start opencode");
         string output = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
-        if (p.ExitCode != 0)
+        if (p.ExitCode is not 0)
         {
             throw new LaunchException($"opencode db failed: {p.StandardError.ReadToEnd().Trim()}");
         }
@@ -234,7 +234,7 @@ internal static partial class Commands
                 Json.Num(tok["input"]), Json.Num(tok["output"]), Json.Num(tok["reasoning"]),
                 Json.Num(cache?["read"]), Json.Num(cache?["write"]), 0)));
         }
-        if (calls.Count == 0)
+        if (calls.Count is 0)
         {
             throw new LaunchException($"no assistant messages with usage in opencode session {session}");
         }
@@ -248,15 +248,16 @@ internal static partial class Commands
             .OrderBy(g => g.Key.Item1, StringComparer.Ordinal).ThenBy(g => g.Key.Item2, StringComparer.Ordinal)
             .Select(g =>
             {
-                int ok = g.Count(r => Json.Str(r, "status") == "success");
+                int ok = g.Count(r => Json.Str(r, "status") is "success");
                 decimal cost = g.Sum(r => Json.Dec(r, "total_cost_usd") ?? 0);
                 List<decimal> quota = [.. g.Select(r => r["quota_used_pct"] as JsonObject).OfType<JsonObject>().Select(q => q.Select(kv => Json.Dec(q, kv.Key) ?? 0).DefaultIfEmpty(0).Max())];
-                int wrappedUp = g.Count(r => Json.Str(r, "status") == "wrapped-up");
+                int wrappedUp = g.Count(r => Json.Str(r, "status") is "wrapped-up");
                 int escalations = g.Count(r => Json.Str(r, "escalate_to") is not null);
                 decimal? costPerSuccess = ok > 0 ? cost / ok : null;
                 decimal? quotaAvg = quota.Count > 0 ? quota.Average() : null;
                 return new StatsRow(g.Key.Item1, g.Key.Item2, g.Count(), ok, wrappedUp, escalations, cost, costPerSuccess, quotaAvg);
-            })];
+            }),
+        ];
     }
 
     public static int Stats(string[] args)
@@ -269,7 +270,7 @@ internal static partial class Commands
         }
 
         DateTimeOffset since = f.GetValueOrDefault("--since") is { } s ? DateTimeOffset.Parse(s, _ic) : DateTimeOffset.MinValue;
-        List<JsonObject> runs = [.. File.ReadLines(path).Select(Json.TryParseObject).OfType<JsonObject>().Where(r => Json.Str(r, "timestamp") is { } t && DateTimeOffset.Parse(t, _ic) >= since)];
+        List<JsonObject> runs = [.. File.ReadLines(path).Select(line => Json.TryParseObject(line)).OfType<JsonObject>().Where(r => Json.Str(r, "timestamp") is { } t && DateTimeOffset.Parse(t, _ic) >= since)];
         List<StatsRow> rows = StatsRows(runs);
         if (f.ContainsKey("--json"))
         {
@@ -284,7 +285,8 @@ internal static partial class Commands
                 ["cost_usd"] = decimal.Round(r.CostUsd, 6, MidpointRounding.ToEven),
                 ["cost_per_success_usd"] = r.CostPerSuccessUsd is { } c ? decimal.Round(c, 6, global::System.MidpointRounding.ToEven) : null,
                 ["quota_pct_per_run"] = r.QuotaPctPerRun is { } q ? decimal.Round(q, 2, global::System.MidpointRounding.ToEven) : null,
-            })]);
+            }),
+            ]);
             JsonObject doc = new()
             {
                 ["schema_version"] = Launcher.RunSchemaVersion,

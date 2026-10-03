@@ -33,7 +33,7 @@ internal sealed class ClaudeRuntime : IRuntime
         }
 
         List<string> a = ["-p"];
-        if (s.Mode == "bare")
+        if (s.Mode is "bare")
         {
             a.Add("--bare");
         }
@@ -50,7 +50,7 @@ internal sealed class ClaudeRuntime : IRuntime
             a.Add("--allowedTools");
             a.AddRange(s.Allowed);
         }
-        if (s.Mode == "lean")
+        if (s.Mode is "lean")
         {
             // Without --bare Claude Code would load CLAUDE.md / AGENTS.md / rules, the user's settings, hooks and
             // plugins. --setting-sources "" loads no user/project/local settings at all (managed settings and
@@ -86,12 +86,16 @@ internal sealed class ClaudeRuntime : IRuntime
             {
                 if (settings["hooks"] is not JsonObject hooks)
                 {
-                    settings["hooks"] = hooks = [];
+                    JsonObject n = [];
+                    settings["hooks"] = n;
+                    hooks = n;
                 }
 
                 if (hooks["PreToolUse"] is not JsonArray pre)
                 {
-                    hooks["PreToolUse"] = pre = [];
+                    JsonArray m = [];
+                    hooks["PreToolUse"] = m;
+                    pre = m;
                 }
 
                 pre.Add(new JsonObject
@@ -121,14 +125,14 @@ internal sealed class ClaudeRuntime : IRuntime
         a.AddRange(["--permission-mode", s.PermissionMode]);
         // Claude Code prices only Claude models correctly, so its own cap is a second net for them only;
         // the launcher's meter enforces the budget for every model.
-        if (s.Provider == "anthropic")
+        if (s.Provider is "anthropic")
         {
             a.AddRange(["--max-budget-usd", s.Budget.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         }
         // Partial messages carry each API call's final output tokens (message_delta); the assistant events only
         // repeat the count from the start of the message, which undercounts output.
         a.AddRange(["--no-session-persistence", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
-        return new Prepared(claude, a, env, "claude " + string.Join(' ', a.Select(Runtimes.Quote)));
+        return new Prepared(claude, a, env, "claude " + string.Join(' ', a.Select(arg => Runtimes.Quote(arg))));
     }
 
     private static JsonObject? UserSettingsEnv()
@@ -145,13 +149,13 @@ internal sealed class ClaudeRuntime : IRuntime
 
     public bool Record(string line)
     {
-        if (line.StartsWith("{\"type\":\"stream_event\"", StringComparison.Ordinal))
+        if (!line.StartsWith("{\"type\":\"stream_event\"", StringComparison.Ordinal))
         {
-            return line.Contains("\"message_start\"", StringComparison.Ordinal)
-                || line.Contains("\"message_delta\"", StringComparison.Ordinal);
+            return true;
         }
 
-        return true;
+        return line.Contains("\"message_start\"", StringComparison.Ordinal)
+            || line.Contains("\"message_delta\"", StringComparison.Ordinal);
     }
 
     public static Usage FromApiUsage(string id, string model, JsonObject u)
@@ -188,39 +192,40 @@ internal sealed class ClaudeRuntime : IRuntime
     public Usage? Parse(JsonObject line, Outcome o)
     {
         string? type = Json.Str(line, "type");
-        if (type == "stream_event" && line["event"] is JsonObject ev)
+        if (type is "stream_event" && line["event"] is JsonObject ev)
         {
             string? evType = Json.Str(ev, "type");
-            if (evType == "message_start" && ev["message"] is JsonObject start && start["usage"] is JsonObject su)
+            if (evType is "message_start" && ev["message"] is JsonObject start && start["usage"] is JsonObject su)
             {
                 _streaming = Json.Str(start, "id") ?? Guid.NewGuid().ToString();
                 return Merge(FromApiUsage(_streaming, Json.Str(start, "model") ?? string.Empty, su));
             }
-            if (evType == "message_delta" && _streaming is not null && ev["usage"] is JsonObject du)
+            if (evType is "message_delta" && _streaming is not null && ev["usage"] is JsonObject du)
             {
                 return Merge(FromApiUsage(_streaming, string.Empty, du));
             }
 
             return null;
         }
-        if (type == "assistant" && line["message"] is JsonObject msg && msg["usage"] is JsonObject u)
+        if (type is "assistant" && line["message"] is JsonObject msg && msg["usage"] is JsonObject u)
         {
             return Merge(FromApiUsage(Json.Str(msg, "id") ?? Guid.NewGuid().ToString(), Json.Str(msg, "model") ?? string.Empty, u));
         }
 
-        if (type == "result")
+        if (type is not "result")
         {
-            o.HasResult = true;
-            o.IsError = Json.Bool(line, "is_error");
-            o.Report = Json.Str(line, "result") ?? string.Empty;
-            o.SessionId = Json.Str(line, "session_id");
-            o.Subtype = Json.Str(line, "subtype");
-            o.TerminalReason = Json.Str(line, "terminal_reason");
-            o.ReportedCost = Json.Dec(line, "total_cost_usd");
-            o.Turns = Json.Num(line["num_turns"]);
-            o.Denials = line["permission_denials"] is JsonArray d ? d.Count : 0;
-            o.Thinking = Json.Num(line["usage"]?["output_tokens_details"]?["thinking_tokens"]);
+            return null;
         }
+        o.HasResult = true;
+        o.IsError = Json.Bool(line, "is_error");
+        o.Report = Json.Str(line, "result") ?? string.Empty;
+        o.SessionId = Json.Str(line, "session_id");
+        o.Subtype = Json.Str(line, "subtype");
+        o.TerminalReason = Json.Str(line, "terminal_reason");
+        o.ReportedCost = Json.Dec(line, "total_cost_usd");
+        o.Turns = Json.Num(line["num_turns"]);
+        o.Denials = line["permission_denials"] is JsonArray d ? d.Count : 0;
+        o.Thinking = Json.Num(line["usage"]?["output_tokens_details"]?["thinking_tokens"]);
         return null;
     }
 
