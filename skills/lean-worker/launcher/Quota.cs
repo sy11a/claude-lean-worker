@@ -103,7 +103,20 @@ internal static class Quota
             // boundary, so one can be shorter (22:00-02:00 CEST was 4 h); it is still the "5h" window.
             // Other families are named by their block length (video: 24h).
             long hours = (long)Math.Round((Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000.0, MidpointRounding.ToEven);
-            string interval = model == "general" ? "5h" : hours > 0 ? string.Create(CultureInfo.InvariantCulture, $"{hours}h") : "interval";
+            string interval;
+            if (model == "general")
+            {
+                interval = "5h";
+            }
+            else if (hours > 0)
+            {
+                interval = string.Create(CultureInfo.InvariantCulture, $"{hours}h");
+            }
+            else
+            {
+                interval = "interval";
+            }
+
             windows.Add(Window($"{prefix}{interval}", m, "current_interval", "end_time"));
             windows.Add(Window($"{prefix}weekly", m, "current_weekly", "weekly_end_time"));
         }

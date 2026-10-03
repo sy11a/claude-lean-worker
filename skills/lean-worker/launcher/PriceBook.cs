@@ -191,13 +191,7 @@ internal sealed class PriceBook
             Json.Dec(o, "cacheWrite1h") ?? fallback?.CacheWrite1h ?? (input * 2));
     }
 
-    public List<string> QuotaProviders()
-    {
-        return (_doc["providers"] as JsonObject)?.Where(kv => kv.Value?["quota"] is JsonObject).Select(kv => kv.Key).ToList() ?? [];
-    }
+    public List<string> QuotaProviders() => (_doc["providers"] as JsonObject)?.Where(kv => kv.Value?["quota"] is JsonObject).Select(kv => kv.Key).ToList() ?? [];
 
-    public IEnumerable<(string Key, string? AsOf)> Entries()
-    {
-        return (_doc["models"] as JsonObject)?.Select(kv => (kv.Key, Json.Str(kv.Value as JsonObject, "asOf") ?? AsOf)) ?? [];
-    }
+    public IEnumerable<(string Key, string? AsOf)> Entries() => (_doc["models"] as JsonObject)?.Select(kv => (kv.Key, Json.Str(kv.Value as JsonObject, "asOf") ?? AsOf)) ?? [];
 }

@@ -79,7 +79,7 @@ internal static class Launcher
         List<string> chain;
         if (o.Model is not null)
         {
-            chain = new List<string> { o.Model };
+            chain = [o.Model];
         }
         else if (profile?["model"] is JsonArray arr)
         {
@@ -87,19 +87,19 @@ internal static class Launcher
         }
         else
         {
-            chain = new List<string> { Json.Str(profile, "model") ?? "claude-sonnet-5" };
+            chain = [Json.Str(profile, "model") ?? "claude-sonnet-5"];
         }
         string effort = o.Effort ?? Json.Str(profile, "effort") ?? "medium";
         string? variant = o.Variant ?? Json.Str(profile, "variant");
-        List<string> tools = o.Tools ?? Json.StrList(profile, "tools") ?? new List<string> { "Read", "Edit", "Write", "Glob", "Grep", "Bash" };
-        List<string> allowed = o.AllowedTools.Count > 0 ? o.AllowedTools : Json.StrList(profile, "allowedTools") ?? new List<string>();
+        List<string> tools = o.Tools ?? Json.StrList(profile, "tools") ?? ["Read", "Edit", "Write", "Glob", "Grep", "Bash"];
+        List<string> allowed = o.AllowedTools.Count > 0 ? o.AllowedTools : Json.StrList(profile, "allowedTools") ?? [];
         // The paths the task may write; a continuation keeps its original run's scope.
         List<string>? writeScope = o.WriteScope.Count > 0 ? o.WriteScope
             : Json.StrList(profile, "writeScope") ?? Json.StrList(prevSummary, "write_scope");
         decimal budget = o.MaxBudgetUsd ?? Json.Dec(profile, "maxBudgetUsd") ?? 2m;
         // Share of the budget after which the wrap-up hook blocks tools; 0 turns it off.
         decimal wrapUpAt = o.WrapUpAt ?? Json.Dec(profile, "wrapUpAt") ?? 0.8m;
-        if (wrapUpAt < 0 || wrapUpAt >= 1)
+        if (wrapUpAt is < 0 or >= 1)
         {
             throw new LaunchException(string.Create(CultureInfo.InvariantCulture, $"invalid wrap-up share {wrapUpAt} (0 = off, else below 1)"));
         }
@@ -220,7 +220,7 @@ internal static class Launcher
         ModelTraits? traits = prices.Traits(model);
         if (traits is not null)
         {
-            List<string> added = new List<string>([.. traits.AllowedTools.Where(t => !allowed.Contains(t))]);
+            List<string> added = new([.. traits.AllowedTools.Where(t => !allowed.Contains(t))]);
             if (added.Count > 0 && tools.Contains("Bash", StringComparer.OrdinalIgnoreCase))
             {
                 allowed = new List<string>([.. allowed, .. added]);
@@ -245,18 +245,12 @@ internal static class Launcher
         string mode = "n/a";
         if (runtimeName == "claude")
         {
-            switch (o.Mode)
+            mode = o.Mode switch
             {
-                case "auto":
-                    mode = provider is not "anthropic" || wrapUpAt > 0 || !hasKey ? "lean" : "bare";
-                    break;
-                case "bare":
-                case "lean":
-                    mode = o.Mode;
-                    break;
-                default:
-                    throw new LaunchException($"invalid mode '{o.Mode}' (auto | bare | lean)");
-            }
+                "auto" => provider is not "anthropic" || wrapUpAt > 0 || !hasKey ? "lean" : "bare",
+                "bare" or "lean" => o.Mode,
+                _ => throw new LaunchException($"invalid mode '{o.Mode}' (auto | bare | lean)"),
+            };
             if (mode == "bare" && (!hasKey || provider is not "anthropic"))
             {
                 throw new LaunchException("--mode bare needs ANTHROPIC_API_KEY (or --claude-settings with an apiKeyHelper) and an Anthropic model: --bare never reads " +
@@ -477,7 +471,7 @@ internal static class Launcher
 
         // ---------- print ----------
         CultureInfo ic = CultureInfo.InvariantCulture;
-        Func<JsonNode?, string> N = n => Json.Num(n).ToString("N0", ic);
+        string N(JsonNode? n) => Json.Num(n).ToString("N0", ic);
         TextWriter w = Console.Out;
         await w.WriteLineAsync("LEAN-WORKER RESULT").ConfigureAwait(false);
         await w.WriteLineAsync($"run:      {runDir}").ConfigureAwait(false);
@@ -548,7 +542,10 @@ internal static class Launcher
             if (fi.Exists && fi.Length > 0)
             {
                 await w.WriteLineAsync("--- stderr (first 40 lines) ---").ConfigureAwait(false);
-                foreach (string l in File.ReadLines(stderrPath, Json.Utf8).Take(40)) w.WriteLine(l);
+                foreach (string l in File.ReadLines(stderrPath, Json.Utf8).Take(40))
+                {
+                    w.WriteLine(l);
+                }
             }
         }
 

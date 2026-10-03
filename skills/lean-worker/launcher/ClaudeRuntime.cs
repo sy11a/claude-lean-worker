@@ -57,7 +57,7 @@ internal sealed class ClaudeRuntime : IRuntime
             // --settings still apply), so personal hooks and plugins stay out while the injected hook runs.
             JsonObject settings = s.ClaudeSettings is not null
                 ? Json.ParseLenient(File.ReadAllText(s.ClaudeSettings)).AsObject()
-                : new JsonObject();
+                : [];
             if (!s.KeepClaudeMd)
             {
                 settings["claudeMdExcludes"] = new JsonArray("**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md", "**/.claude/rules/**");
@@ -86,12 +86,12 @@ internal sealed class ClaudeRuntime : IRuntime
             {
                 if (settings["hooks"] is not JsonObject hooks)
                 {
-                    settings["hooks"] = hooks = new JsonObject();
+                    settings["hooks"] = hooks = [];
                 }
 
                 if (hooks["PreToolUse"] is not JsonArray pre)
                 {
-                    hooks["PreToolUse"] = pre = new JsonArray();
+                    hooks["PreToolUse"] = pre = [];
                 }
 
                 pre.Add(new JsonObject

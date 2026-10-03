@@ -114,7 +114,7 @@ internal sealed class OpencodeRuntime : IRuntime
         }
         if (s.Provider.StartsWith("zai", StringComparison.OrdinalIgnoreCase))
         {
-            providerBlock ??= new JsonObject();
+            providerBlock ??= [];
             ApplyZaiSessionAffinityHeaders(providerBlock, s.Model);
             config["provider"] = new JsonObject { [s.Provider] = providerBlock };
         }
@@ -151,8 +151,10 @@ internal sealed class OpencodeRuntime : IRuntime
             }
             else
             {
-                JsonObject b = new JsonObject();
-                b[s.Provider] = providerBlock!.DeepClone();
+                JsonObject b = new()
+                {
+                    [s.Provider] = providerBlock!.DeepClone()
+                };
                 recorded["provider"] = b;
             }
         }
@@ -202,19 +204,19 @@ internal sealed class OpencodeRuntime : IRuntime
     {
         if (provider["models"] is not JsonObject models)
         {
-            models = new JsonObject();
+            models = [];
             provider["models"] = models;
         }
 
         if (models[model] is not JsonObject m)
         {
-            m = new JsonObject();
+            m = [];
             models[model] = m;
         }
 
         if (m["headers"] is not JsonObject headers)
         {
-            headers = new JsonObject();
+            headers = [];
             m["headers"] = headers;
         }
 

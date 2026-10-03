@@ -12,10 +12,6 @@
 // Exit codes: 0 = worker finished without error, 1 = worker reported an error, 2 = launcher failed,
 // 3 = worker wrapped up near its budget and left a handoff (continue with --continue-from <run-dir>).
 
-using System.Diagnostics;
-using System.Globalization;
-using System.Text.Json.Nodes;
-
 namespace LeanWorker;
 
 internal static class Program

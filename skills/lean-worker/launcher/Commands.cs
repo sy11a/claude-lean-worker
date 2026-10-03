@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using QuotaApi = global::LeanWorker.Quota;
+using QuotaApi = LeanWorker.Quota;
 
 namespace LeanWorker;
 
@@ -77,7 +77,7 @@ internal static partial class Commands
         Dictionary<string, string?> f = Flags(args, "--json");
         PriceBook prices = PriceBook.Load(f.GetValueOrDefault("--runs-root") ?? ".lean-worker", f.GetValueOrDefault("--prices"));
         TimeSpan? maxAge = f.TryGetValue("--max-age", out string? s) && s is not null ? TimeSpan.FromSeconds(int.Parse(s, _ic)) : null;
-        List<string> names = f.TryGetValue("--provider", out string? p) && p is not null ? new List<string> { p } : prices.QuotaProviders();
+        List<string> names = f.TryGetValue("--provider", out string? p) && p is not null ? [p] : prices.QuotaProviders();
         if (names.Count == 0)
         {
             throw new LaunchException("no provider in prices.json has a quota adapter");
@@ -102,8 +102,8 @@ internal static partial class Commands
                         Console.Out.WriteLine($"  {w.Name}: {w.Detail}");
                     }
 
-                    (bool ok, string? why) head = QuotaApi.Headroom(provider, q);
-                    Console.Out.WriteLine($"  headroom for workers: {(head.ok ? "yes" : "no")} ({head.why})");
+                    (bool ok, string? why) = QuotaApi.Headroom(provider, q);
+                    Console.Out.WriteLine($"  headroom for workers: {(ok ? "yes" : "no")} ({why})");
                 }
             }
             catch (Exception ex) when (QuotaApi.IsReadFailure(ex) && ex is not LaunchException)
@@ -273,7 +273,7 @@ internal static partial class Commands
         List<StatsRow> rows = StatsRows(runs);
         if (f.ContainsKey("--json"))
         {
-            JsonArray groups = new JsonArray([.. rows.Select(r => (JsonNode)new JsonObject
+            JsonArray groups = new([.. rows.Select(r => (JsonNode)new JsonObject
             {
                 ["profile"] = r.Profile,
                 ["model"] = r.Model,
@@ -285,7 +285,7 @@ internal static partial class Commands
                 ["cost_per_success_usd"] = r.CostPerSuccessUsd is { } c ? decimal.Round(c, 6, global::System.MidpointRounding.ToEven) : null,
                 ["quota_pct_per_run"] = r.QuotaPctPerRun is { } q ? decimal.Round(q, 2, global::System.MidpointRounding.ToEven) : null,
             })]);
-            JsonObject doc = new JsonObject
+            JsonObject doc = new()
             {
                 ["schema_version"] = Launcher.RunSchemaVersion,
                 ["runs_file"] = Path.GetFullPath(path),
