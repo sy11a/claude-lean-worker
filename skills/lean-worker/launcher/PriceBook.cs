@@ -6,48 +6,13 @@ using System.Text.Json.Nodes;
 
 namespace LeanWorker;
 
-/// <summary>One API call's token usage. Output excludes reasoning; both are billed at the output price.</summary>
-internal sealed record Usage(string Id, string Model, long Input, long Output, long Reasoning,
-                             long CacheRead, long CacheWrite5m, long CacheWrite1h)
-{
-    public long Context => Input + CacheRead + CacheWrite5m + CacheWrite1h;
-}
-
-internal sealed record Price(decimal Input, decimal Output, decimal CacheRead, decimal CacheWrite, decimal CacheWrite1h);
-
-internal sealed record ModelPrice(string Key, Price Base, long? AboveTokens, Price? Above, decimal UsdRate)
-{
-    public decimal Cost(Usage u)
-    {
-        Price p = AboveTokens is { } t && Above is not null && u.Context > t ? Above : Base;
-        decimal perMTok = (u.Input * p.Input) + ((u.Output + u.Reasoning) * p.Output) + (u.CacheRead * p.CacheRead)
-                      + (u.CacheWrite5m * p.CacheWrite) + (u.CacheWrite1h * p.CacheWrite1h);
-        return perMTok / 1_000_000m * UsdRate;
-    }
-}
-
-internal sealed class Provider(string name, JsonObject? o)
-{
-    public string Name { get; } = name;
-    public JsonObject Raw { get; } = o ?? [];
-    /// <summary>metered | subscription | auto (anthropic: subscription in lean mode without a key).</summary>
-    public string Billing => Json.Str(Raw, "billing") ?? "metered";
-    public string PriceAs => Json.Str(Raw, "priceAs") ?? Name;
-    public string? AnthropicBaseUrl => Json.Str(Raw, "anthropicBaseUrl");
-    public string? KeyEnv => Json.Str(Raw, "keyEnv");
-    public JsonObject? Quota => Raw["quota"] as JsonObject;
-}
-
-/// <summary>What a worker needs because of the model, whichever provider serves it (price book key "modelTraits").</summary>
-internal sealed record ModelTraits(string Key, List<string> AllowedTools, string? Note);
-
 internal sealed class PriceBook
 {
     private readonly JsonObject _doc;
     public List<string> Sources { get; } = [];
     public List<string> Warnings { get; } = [];
-    private static readonly string[] KeyRouting = ["anthropicBaseUrl", "keyEnv"];
-    private static readonly string[] QuotaRouting = ["url", "adapter"];
+    private static readonly string[] _keyRouting = ["anthropicBaseUrl", "keyEnv"];
+    private static readonly string[] _quotaRouting = ["url", "adapter"];
 
     private static IEnumerable<string> StripKeyRouting(JsonObject doc, string file)
     {
@@ -59,10 +24,10 @@ internal sealed class PriceBook
                 continue;
             }
 
-            foreach (string? k in KeyRouting.Where(p.ContainsKey)) { _ = p.Remove(k); dropped.Add($"{name}.{k}"); }
+            foreach (string? k in _keyRouting.Where(p.ContainsKey)) { _ = p.Remove(k); dropped.Add($"{name}.{k}"); }
             if (p["quota"] is JsonObject q)
             {
-                foreach (string? k in QuotaRouting.Where(q.ContainsKey)) { _ = q.Remove(k); dropped.Add($"{name}.quota.{k}"); }
+                foreach (string? k in _quotaRouting.Where(q.ContainsKey)) { _ = q.Remove(k); dropped.Add($"{name}.quota.{k}"); }
             }
         }
         return dropped.Count == 0 ? [] : [$"ignored in {file} (set them in {UserFile()}): {string.Join(", ", dropped)}"];
@@ -73,7 +38,9 @@ internal sealed class PriceBook
     public string? AsOf => Json.Str(_doc, "asOf");
     public string UnknownModel => Json.Str(_doc, "unknownModel") ?? "dearest";
 
-    /// <summary>Shipped file, then the user's, then the project's (or --prices), each merged over the last.</summary>
+    /// <summary>
+    /// Shipped file, then the user's, then the project's (or --prices), each merged over the last.
+    /// </summary>
     public static PriceBook Load(string runsRoot, string? explicitFile = null)
     {
         List<string> files =
@@ -168,7 +135,9 @@ internal sealed class PriceBook
         return best.Value is JsonObject o ? new ModelTraits(best.Key, Json.StrList(o, "allowedTools") ?? [], Json.Str(o, "note")) : null;
     }
 
-    /// <summary>Applies the unknownModel policy: "dearest", "error", or a model key to price as.</summary>
+    /// <summary>
+    /// Applies the unknownModel policy: "dearest", "error", or a model key to price as.
+    /// </summary>
     public ModelPrice Resolve(string provider, string model, out string? note)
     {
         note = null;
@@ -185,7 +154,7 @@ internal sealed class PriceBook
         }
 
         note = $"no price for {provider}/{model}; priced as {policy}";
-        if (policy != "dearest" && _doc["models"]?[policy] is JsonObject named)
+        if (policy is not "dearest" && _doc["models"]?[policy] is JsonObject named)
         {
             return Parse(policy, named);
         }
@@ -193,10 +162,13 @@ internal sealed class PriceBook
         return Dearest() ?? throw new LaunchException("prices.json has no models");
     }
 
-    public ModelPrice? Dearest() => (_doc["models"] as JsonObject)?
-        .Where(kv => kv.Value is JsonObject)
-        .Select(kv => Parse(kv.Key, (JsonObject)kv.Value!))
-        .OrderByDescending(p => p.Base.Output).FirstOrDefault();
+    public ModelPrice? Dearest()
+    {
+        return (_doc["models"] as JsonObject)?
+            .Where(kv => kv.Value is JsonObject)
+            .Select(kv => Parse(kv.Key, (JsonObject)kv.Value!))
+            .OrderByDescending(p => p.Base.Output).FirstOrDefault();
+    }
 
     private ModelPrice Parse(string key, JsonObject o)
     {
@@ -219,9 +191,13 @@ internal sealed class PriceBook
             Json.Dec(o, "cacheWrite1h") ?? fallback?.CacheWrite1h ?? (input * 2));
     }
 
-    public List<string> QuotaProviders() =>
-        (_doc["providers"] as JsonObject)?.Where(kv => kv.Value?["quota"] is JsonObject).Select(kv => kv.Key).ToList() ?? [];
+    public List<string> QuotaProviders()
+    {
+        return (_doc["providers"] as JsonObject)?.Where(kv => kv.Value?["quota"] is JsonObject).Select(kv => kv.Key).ToList() ?? [];
+    }
 
-    public IEnumerable<(string Key, string? AsOf)> Entries() =>
-        (_doc["models"] as JsonObject)?.Select(kv => (kv.Key, Json.Str(kv.Value as JsonObject, "asOf") ?? AsOf)) ?? [];
+    public IEnumerable<(string Key, string? AsOf)> Entries()
+    {
+        return (_doc["models"] as JsonObject)?.Select(kv => (kv.Key, Json.Str(kv.Value as JsonObject, "asOf") ?? AsOf)) ?? [];
+    }
 }

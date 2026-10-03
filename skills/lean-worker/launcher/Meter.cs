@@ -19,8 +19,10 @@ internal sealed class Meter(PriceBook prices, string provider, string runDir, de
     public List<string> Notes { get; } = [];
     public string WrapUpFile => Path.Combine(runDir, "wrapup.json");
 
-    /// <summary>Adds or replaces one API call's usage (a call can be reported more than once; the last report wins).
-    /// Returns true when the hard cap has just been reached.</summary>
+    /// <summary>
+    /// Adds or replaces one API call's usage (a call can be reported more than once; the last report wins).
+    /// Returns true when the hard cap has just been reached.
+    /// </summary>
     public bool Add(Usage u)
     {
         lock (_lock)
@@ -84,7 +86,7 @@ internal sealed class Meter(PriceBook prices, string provider, string runDir, de
     {
         lock (_lock)
         {
-            return [.. _order.Select(id => _calls[id].Usage)];
+            return new List<Usage>([.. _order.Select(id => _calls[id].Usage)]);
         }
     }
 

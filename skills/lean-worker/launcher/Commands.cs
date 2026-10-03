@@ -5,12 +5,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using QuotaApi = global::LeanWorker.Quota;
 
 namespace LeanWorker;
 
 internal static partial class Commands
 {
-    private static readonly CultureInfo Ic = CultureInfo.InvariantCulture;
+    private static readonly CultureInfo _ic = CultureInfo.InvariantCulture;
 
     private static Dictionary<string, string?> Flags(string[] args, params string[] booleans)
     {
@@ -34,8 +35,10 @@ internal static partial class Commands
         return d;
     }
 
-    /// <summary>PreToolUse hook: once the launcher has written wrapup.json, deny every tool call with its reason.
-    /// A hook failure must never block the worker; the launcher's budget still applies.</summary>
+    /// <summary>
+    /// PreToolUse hook: once the launcher has written wrapup.json, deny every tool call with its reason.
+    /// A hook failure must never block the worker; the launcher's budget still applies.
+    /// </summary>
     public static int Hook(string[] args)
     {
         try
@@ -73,8 +76,8 @@ internal static partial class Commands
     {
         Dictionary<string, string?> f = Flags(args, "--json");
         PriceBook prices = PriceBook.Load(f.GetValueOrDefault("--runs-root") ?? ".lean-worker", f.GetValueOrDefault("--prices"));
-        TimeSpan? maxAge = f.TryGetValue("--max-age", out string? s) && s is not null ? TimeSpan.FromSeconds(int.Parse(s, Ic)) : null;
-        List<string> names = f.TryGetValue("--provider", out string? p) && p is not null ? [p] : prices.QuotaProviders();
+        TimeSpan? maxAge = f.TryGetValue("--max-age", out string? s) && s is not null ? TimeSpan.FromSeconds(int.Parse(s, _ic)) : null;
+        List<string> names = f.TryGetValue("--provider", out string? p) && p is not null ? new List<string> { p } : prices.QuotaProviders();
         if (names.Count == 0)
         {
             throw new LaunchException("no provider in prices.json has a quota adapter");
@@ -86,23 +89,24 @@ internal static partial class Commands
             Provider provider = prices.Provider(name);
             try
             {
-                QuotaReading q = LeanWorker.Quota.Read(provider, maxAge);
+                QuotaReading q = QuotaApi.Read(provider, maxAge);
                 if (f.ContainsKey("--json"))
                 {
                     readings.Add(q.ToJson());
                 }
                 else
                 {
-                    Console.Out.WriteLine($"{name}{(q.Level is null ? "" : $" ({q.Level})")}: {q.Line()}");
+                    Console.Out.WriteLine($"{name}{(q.Level is null ? string.Empty : $" ({q.Level})")}: {q.Line()}");
                     foreach (QuotaWindow? w in q.Windows.Where(w => w.Detail is not null))
                     {
                         Console.Out.WriteLine($"  {w.Name}: {w.Detail}");
                     }
 
-                    Console.Out.WriteLine($"  headroom for workers: {(LeanWorker.Quota.Headroom(provider, q).Ok ? "yes" : "no")} ({LeanWorker.Quota.Headroom(provider, q).Why})");
+                    (bool ok, string? why) head = QuotaApi.Headroom(provider, q);
+                    Console.Out.WriteLine($"  headroom for workers: {(head.ok ? "yes" : "no")} ({head.why})");
                 }
             }
-            catch (Exception ex) when (LeanWorker.Quota.IsReadFailure(ex) && ex is not LaunchException)
+            catch (Exception ex) when (QuotaApi.IsReadFailure(ex) && ex is not LaunchException)
             {
                 throw new LaunchException($"quota for {name}: {ex.Message}");
             }
@@ -168,11 +172,11 @@ internal static partial class Commands
             (int Calls, decimal Cost, long Tokens) cur = perModel.GetValueOrDefault(key);
             perModel[key] = (cur.Calls + 1, cur.Cost + c, cur.Tokens + u.Context + u.Output + u.Reasoning);
         }
-        Console.Out.WriteLine($"{label}: {calls.Count} API calls, ${total.ToString("0.0000", Ic)} at list price");
+        Console.Out.WriteLine($"{label}: {calls.Count} API calls, ${total.ToString("0.0000", _ic)} at list price");
         foreach ((string? key, (int Calls, decimal Cost, long Tokens) v) in perModel.OrderByDescending(kv => kv.Value.Cost))
         {
             string billing = Launcher.Billing(prices.Provider(PriceBook.Split(key).Provider), "claude", hasKey: false);
-            Console.Out.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {key}: {v.Calls} calls, {v.Tokens.ToString("N0", Ic)} tokens, ${v.Cost.ToString("0.0000", Ic)} ({billing})"));
+            Console.Out.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {key}: {v.Calls} calls, {v.Tokens.ToString("N0", _ic)} tokens, ${v.Cost.ToString("0.0000", _ic)} ({billing})"));
         }
         foreach (string n in notes)
         {
@@ -226,7 +230,7 @@ internal static partial class Commands
             }
 
             JsonObject? cache = tok["cache"] as JsonObject;
-            calls.Add((Json.Str(row, "provider") ?? "", new Usage(Json.Str(row, "id") ?? "", Json.Str(row, "model") ?? "",
+            calls.Add((Json.Str(row, "provider") ?? string.Empty, new Usage(Json.Str(row, "id") ?? string.Empty, Json.Str(row, "model") ?? string.Empty,
                 Json.Num(tok["input"]), Json.Num(tok["output"]), Json.Num(tok["reasoning"]),
                 Json.Num(cache?["read"]), Json.Num(cache?["write"]), 0)));
         }
@@ -238,22 +242,22 @@ internal static partial class Commands
         return calls;
     }
 
-    /// <summary>One line of <c>stats</c>: the runs of one profile on one model.</summary>
-    internal sealed record StatsRow(string Profile, string Model, int Runs, int Success, int WrappedUp, int Escalations,
-                                    decimal CostUsd, decimal? CostPerSuccessUsd, decimal? QuotaPctPerRun);
-
-    internal static List<StatsRow> StatsRows(IEnumerable<JsonObject> runs) =>
-        [.. runs.GroupBy(r => (Json.Str(r, "profile") ?? "-", $"{Json.Str(r, "provider") ?? "anthropic"}/{Json.Str(r, "model")}"))
+    internal static List<StatsRow> StatsRows(IEnumerable<JsonObject> runs)
+    {
+        return [.. runs.GroupBy(r => (Json.Str(r, "profile") ?? "-", $"{Json.Str(r, "provider") ?? "anthropic"}/{Json.Str(r, "model")}"))
             .OrderBy(g => g.Key.Item1, StringComparer.Ordinal).ThenBy(g => g.Key.Item2, StringComparer.Ordinal)
             .Select(g =>
             {
                 int ok = g.Count(r => Json.Str(r, "status") == "success");
                 decimal cost = g.Sum(r => Json.Dec(r, "total_cost_usd") ?? 0);
                 List<decimal> quota = [.. g.Select(r => r["quota_used_pct"] as JsonObject).OfType<JsonObject>().Select(q => q.Select(kv => Json.Dec(q, kv.Key) ?? 0).DefaultIfEmpty(0).Max())];
-                return new StatsRow(g.Key.Item1, g.Key.Item2, g.Count(), ok, g.Count(r => Json.Str(r, "status") == "wrapped-up"),
-                    g.Count(r => Json.Str(r, "escalate_to") is not null), cost, ok > 0 ? cost / ok : null,
-                    quota.Count > 0 ? quota.Average() : null);
+                int wrappedUp = g.Count(r => Json.Str(r, "status") == "wrapped-up");
+                int escalations = g.Count(r => Json.Str(r, "escalate_to") is not null);
+                decimal? costPerSuccess = ok > 0 ? cost / ok : null;
+                decimal? quotaAvg = quota.Count > 0 ? quota.Average() : null;
+                return new StatsRow(g.Key.Item1, g.Key.Item2, g.Count(), ok, wrappedUp, escalations, cost, costPerSuccess, quotaAvg);
             })];
+    }
 
     public static int Stats(string[] args)
     {
@@ -264,29 +268,30 @@ internal static partial class Commands
             throw new LaunchException($"no runs recorded yet ({path})");
         }
 
-        DateTimeOffset since = f.GetValueOrDefault("--since") is { } s ? DateTimeOffset.Parse(s, Ic) : DateTimeOffset.MinValue;
-        List<JsonObject> runs = [.. File.ReadLines(path).Select(Json.TryParseObject).OfType<JsonObject>().Where(r => Json.Str(r, "timestamp") is { } t && DateTimeOffset.Parse(t, Ic) >= since)];
+        DateTimeOffset since = f.GetValueOrDefault("--since") is { } s ? DateTimeOffset.Parse(s, _ic) : DateTimeOffset.MinValue;
+        List<JsonObject> runs = [.. File.ReadLines(path).Select(Json.TryParseObject).OfType<JsonObject>().Where(r => Json.Str(r, "timestamp") is { } t && DateTimeOffset.Parse(t, _ic) >= since)];
         List<StatsRow> rows = StatsRows(runs);
         if (f.ContainsKey("--json"))
         {
-            JsonObject doc = new()
+            JsonArray groups = new JsonArray([.. rows.Select(r => (JsonNode)new JsonObject
+            {
+                ["profile"] = r.Profile,
+                ["model"] = r.Model,
+                ["runs"] = r.Runs,
+                ["success"] = r.Success,
+                ["wrapped_up"] = r.WrappedUp,
+                ["escalations"] = r.Escalations,
+                ["cost_usd"] = decimal.Round(r.CostUsd, 6, MidpointRounding.ToEven),
+                ["cost_per_success_usd"] = r.CostPerSuccessUsd is { } c ? decimal.Round(c, 6, global::System.MidpointRounding.ToEven) : null,
+                ["quota_pct_per_run"] = r.QuotaPctPerRun is { } q ? decimal.Round(q, 2, global::System.MidpointRounding.ToEven) : null,
+            })]);
+            JsonObject doc = new JsonObject
             {
                 ["schema_version"] = Launcher.RunSchemaVersion,
                 ["runs_file"] = Path.GetFullPath(path),
                 ["since"] = since == DateTimeOffset.MinValue ? null : since.ToString("o"),
                 ["cost_basis"] = "list price; list-price equivalent for subscriptions",
-                ["groups"] = new JsonArray([.. rows.Select(r => (JsonNode)new JsonObject
-                {
-                    ["profile"] = r.Profile,
-                    ["model"] = r.Model,
-                    ["runs"] = r.Runs,
-                    ["success"] = r.Success,
-                    ["wrapped_up"] = r.WrappedUp,
-                    ["escalations"] = r.Escalations,
-                    ["cost_usd"] = decimal.Round(r.CostUsd, 6, MidpointRounding.ToEven),
-                    ["cost_per_success_usd"] = r.CostPerSuccessUsd is { } c ? decimal.Round(c, 6, global::System.MidpointRounding.ToEven) : null,
-                    ["quota_pct_per_run"] = r.QuotaPctPerRun is { } q ? decimal.Round(q, 2, global::System.MidpointRounding.ToEven) : null,
-                })]),
+                ["groups"] = groups,
             };
             Console.Out.WriteLine(doc.ToJsonString(Json.Indented));
             return 0;
@@ -294,8 +299,11 @@ internal static partial class Commands
         Console.Out.WriteLine($"{"profile",-16} {"model",-34} {"runs",4} {"ok",4} {"wrap",4} {"esc",4} {"cost",9} {"$/success",9} {"quota%/run",10}");
         foreach (StatsRow r in rows)
         {
-            Console.Out.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{r.Profile,-16} {r.Model,-34} {r.Runs,4} {r.Success,4} {r.WrappedUp,4} {r.Escalations,4} {"$" + r.CostUsd.ToString("0.000", Ic),9} ") +
-                                  $"{(r.CostPerSuccessUsd is { } c ? "$" + c.ToString("0.000", Ic) : "-"),9} {(r.QuotaPctPerRun is { } q ? q.ToString("0.0", Ic) : "-"),10}");
+            string successCost = r.CostPerSuccessUsd is { } c ? "$" + c.ToString("0.000", _ic) : "-";
+            string quotaText = r.QuotaPctPerRun is { } q ? q.ToString("0.0", _ic) : "-";
+            string costText = "$" + r.CostUsd.ToString("0.000", _ic);
+            string row = string.Create(CultureInfo.InvariantCulture, $"{r.Profile,-16} {r.Model,-34} {r.Runs,4} {r.Success,4} {r.WrappedUp,4} {r.Escalations,4} {costText,9} {successCost,9} {quotaText,10}");
+            Console.Out.WriteLine(row);
         }
 
         Console.Out.WriteLine("cost = list price (list-price equivalent for subscriptions); esc = runs that offered the next model; quota%/run = largest window increase per run.");
@@ -315,12 +323,12 @@ internal static partial class Commands
         Console.Out.WriteLine($"unknown models: {prices.UnknownModel}");
         foreach ((string? key, string? asOf) in prices.Entries())
         {
-            bool stale = asOf is not null && DateTimeOffset.TryParse(asOf, Ic, DateTimeStyles.AssumeUniversal, out DateTimeOffset d) && DateTimeOffset.Now - d > TimeSpan.FromDays(90);
-            Console.Out.WriteLine($"  {key,-36} as of {asOf ?? "?"}{(stale ? "  <- older than 90 days, check it" : "")}");
+            bool stale = asOf is not null && DateTimeOffset.TryParse(asOf, _ic, DateTimeStyles.AssumeUniversal, out DateTimeOffset d) && DateTimeOffset.Now - d > TimeSpan.FromDays(90);
+            Console.Out.WriteLine($"  {key,-36} as of {asOf ?? "?"}{(stale ? "  <- older than 90 days, check it" : string.Empty)}");
         }
         return 0;
     }
 
-    [GeneratedRegex("^ses_[A-Za-z0-9]+$")]
+    [GeneratedRegex("^ses_[A-Za-z0-9]+$", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex MyRegex();
 }

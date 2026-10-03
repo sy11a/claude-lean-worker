@@ -8,54 +8,11 @@ using System.Text.Json.Nodes;
 
 namespace LeanWorker;
 
-internal sealed record QuotaWindow(string Name, decimal Percent, DateTimeOffset? ResetsAt, string? Detail);
-
-internal sealed record QuotaReading(string Provider, string? Level, List<QuotaWindow> Windows, DateTimeOffset ReadAt)
-{
-    public JsonObject ToJson() => new()
-    {
-        ["provider"] = Provider,
-        ["level"] = Level,
-        ["read_at"] = ReadAt.ToString("o"),
-        ["windows"] = new JsonArray([.. Windows.Select(w => (JsonNode)new JsonObject
-        {
-            ["name"] = w.Name,
-            ["percent"] = w.Percent,
-            ["resets_at"] = w.ResetsAt?.ToString("o"),
-            ["detail"] = w.Detail,
-        })]),
-    };
-
-    public static QuotaReading FromJson(JsonObject o) => new(
-        Json.Str(o, "provider") ?? "", Json.Str(o, "level"),
-        [.. (o["windows"] as JsonArray ?? []).OfType<JsonObject>().Select(w => new QuotaWindow(
-            Json.Str(w, "name") ?? "", Json.Dec(w, "percent") ?? 0,
-            Json.Str(w, "resets_at") is { } r ? DateTimeOffset.Parse(r, System.Globalization.CultureInfo.InvariantCulture) : null,
-            Json.Str(w, "detail")))],
-        DateTimeOffset.Parse(Json.Str(o, "read_at") ?? DateTimeOffset.MinValue.ToString("o"), CultureInfo.InvariantCulture));
-
-    public string Line(QuotaReading? before = null) => string.Join(", ", Windows.Select(w =>
-    {
-        QuotaWindow? prev = before?.Windows.Find(b => b.Name == w.Name);
-        string pct = prev is null || prev.Percent == w.Percent ? string.Create(CultureInfo.InvariantCulture, $"{w.Percent:0.#}%") : string.Create(CultureInfo.InvariantCulture, $"{prev.Percent:0.#}% -> {w.Percent:0.#}%");
-        return $"{w.Name} {pct}{(w.ResetsAt is { } r ? $" (resets in {Until(r)})" : "")}";
-    }));
-
-    private static string Until(DateTimeOffset t)
-    {
-        TimeSpan d = t - DateTimeOffset.Now;
-        if (d < TimeSpan.Zero)
-        {
-            return "0m";
-        }
-
-        return d.TotalDays >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)d.TotalDays}d{d.Hours}h") : d.TotalHours >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)d.TotalHours}h{d.Minutes:00}m") : string.Create(CultureInfo.InvariantCulture, $"{d.Minutes}m");
-    }
-}
-
 internal static class Quota
 {
-    /// <summary>Reads the provider's quota, using a cached reading younger than maxAge (for status lines).</summary>
+    /// <summary>
+    /// Reads the provider's quota, using a cached reading younger than maxAge (for status lines).
+    /// </summary>
     public static QuotaReading Read(Provider p, TimeSpan? maxAge = null)
     {
         string adapter = Json.Str(p.Quota, "adapter") ?? throw new LaunchException($"provider '{p.Name}' has no quota adapter in prices.json");
@@ -76,7 +33,9 @@ internal static class Quota
         return reading;
     }
 
-    /// <summary>A model has headroom while every window is below its maxPercent (defaults: all windows below 95%).</summary>
+    /// <summary>
+    /// A model has headroom while every window is below its maxPercent (defaults: all windows below 95%).
+    /// </summary>
     public static (bool Ok, string Why) Headroom(Provider p, QuotaReading q)
     {
         JsonObject? limits = p.Quota?["maxPercent"] as JsonObject;
@@ -91,12 +50,17 @@ internal static class Quota
         return (true, $"{p.Name} {q.Line()}");
     }
 
-    public static bool IsReadFailure(Exception ex) => ex is LaunchException or HttpRequestException or TaskCanceledException
-        or System.Text.Json.JsonException or InvalidOperationException or IOException or UnauthorizedAccessException;
+    public static bool IsReadFailure(Exception ex)
+    {
+        return ex is LaunchException or HttpRequestException or TaskCanceledException
+            or System.Text.Json.JsonException or InvalidOperationException or IOException or UnauthorizedAccessException;
+    }
 
-    private static string CacheDir() =>
-        Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? Path.Combine(x, "lean-worker")
+    private static string CacheDir()
+    {
+        return Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? Path.Combine(x, "lean-worker")
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "lean-worker");
+    }
 
     // GET /v1/api/openplatform/coding_plan/remains (verified 2026-09-29, international region). A plan key works in one
     // region only: "region": "cn" in the provider's quota block uses api.minimaxi.com.
@@ -134,7 +98,7 @@ internal static class Quota
         foreach (JsonObject m in (doc["model_remains"] as JsonArray ?? []).OfType<JsonObject>())
         {
             string model = Json.Str(m, "model_name") ?? "?";
-            string prefix = model == "general" ? "" : model + "-";
+            string prefix = model == "general" ? string.Empty : model + "-";
             // The text models' interval is the plan's 5-hour block. Blocks are clock-aligned and cut at the UTC day
             // boundary, so one can be shorter (22:00-02:00 CEST was 4 h); it is still the "5h" window.
             // Other families are named by their block length (video: 24h).
@@ -188,7 +152,13 @@ internal static class Quota
         {
             long unit = Json.Num(l["unit"]);
             long number = Json.Num(l["number"]);
-            string span = unit switch { 3 => string.Create(CultureInfo.InvariantCulture, $"{number}h"), 5 => number == 1 ? "monthly" : string.Create(CultureInfo.InvariantCulture, $"{number}mo"), 6 => number == 1 ? "weekly" : string.Create(CultureInfo.InvariantCulture, $"{number}w"), _ => string.Create(CultureInfo.InvariantCulture, $"u{unit}x{number}") };
+            string span = unit switch
+            {
+                3 => string.Create(CultureInfo.InvariantCulture, $"{number}h"),
+                5 => number == 1 ? "monthly" : string.Create(CultureInfo.InvariantCulture, $"{number}mo"),
+                6 => number == 1 ? "weekly" : string.Create(CultureInfo.InvariantCulture, $"{number}w"),
+                _ => string.Create(CultureInfo.InvariantCulture, $"u{unit}x{number}"),
+            };
             string? type = Json.Str(l, "type");
             string name = type == "TIME_LIMIT" ? $"mcp-{span}" : span;
             DateTimeOffset? reset = l["nextResetTime"] is JsonValue r && r.TryGetValue(out long ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime() : null;
