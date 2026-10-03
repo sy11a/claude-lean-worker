@@ -81,33 +81,7 @@ internal static class Launcher
     internal static async Task<(int ExitCode, bool TimedOut, bool CapKilled)> RunWorkerAsync(Prepared prep, string stdin,
         string streamPath, string stderrPath, int timeoutMinutes, Func<string, bool> record, Func<string, bool> onLine)
     {
-        ProcessStartInfo psi = new()
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            StandardOutputEncoding = Json.Utf8,
-            StandardErrorEncoding = Json.Utf8,
-            FileName = prep.Executable,
-        };
-        foreach (string arg in prep.Args)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        foreach ((string? k, string? v) in prep.Env)
-        {
-            if (v is null)
-            {
-                _ = psi.Environment.Remove(k);
-            }
-            else
-            {
-                psi.Environment[k] = v;
-            }
-        }
-
+        ProcessStartInfo psi = StartInfo(prep);
         using Process p = Process.Start(psi) ?? throw new LaunchException($"could not start {prep.Executable}");
         StreamWriter stream = new(streamPath, append: false, Json.Utf8);
         await using ConfiguredAsyncDisposable streamDisposal = stream.ConfigureAwait(false);
@@ -124,26 +98,17 @@ internal static class Launcher
             bool stop;
             try
             {
-                lock (gate) { if (closed) { return; } if (record(e.Data)) { stream.WriteLine(e.Data); stream.Flush(); } }
-                stop = onLine(e.Data);
+                stop = TryMeter(gate, ref closed, stream, record, onLine, e.Data);
             }
             catch (Exception ex)
             {
                 // Metering broke: fail closed rather than let the worker spend unmetered.
-                lock (gate)
-                {
-                    if (!closed)
-                    {
-                        File.AppendAllText(stderrPath + ".launcher", $"metering failed, worker stopped: {ex}{Environment.NewLine}");
-                    }
-                }
+                FailClosed(gate, ref closed, stderrPath, ex);
                 stop = true;
             }
-            if (stop && !capKilled)
-            {
-                capKilled = true;
-                try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            }
+            if (!stop || capKilled) { return; }
+            capKilled = true;
+            KillQuietly(p);
         };
         p.ErrorDataReceived += (_, e) =>
         {
@@ -160,20 +125,76 @@ internal static class Launcher
         p.BeginErrorReadLine();
         await p.StandardInput.WriteAsync(stdin).ConfigureAwait(false);
         p.StandardInput.Close();
-
-        bool timedOut = !p.WaitForExit(TimeSpan.FromMinutes(timeoutMinutes));
-        if (timedOut)
-        {
-            try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-        }
+        bool timedOut = await WaitForExitAsync(p, timeoutMinutes).ConfigureAwait(false);
         _ = await Task.WhenAny(Task.WhenAll(outDone.Task, errDone.Task), Task.Delay(TimeSpan.FromSeconds(30), TimeProvider.System, CancellationToken.None)).ConfigureAwait(false);
         lock (gate)
         {
             closed = true;
         }
-
         return (timedOut ? -1 : p.ExitCode, timedOut, capKilled);
+    }
+
+    private static ProcessStartInfo StartInfo(Prepared prep)
+    {
+        ProcessStartInfo psi = new()
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Json.Utf8,
+            StandardErrorEncoding = Json.Utf8,
+            FileName = prep.Executable,
+        };
+        foreach (string arg in prep.Args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+        foreach ((string? k, string? v) in prep.Env)
+        {
+            if (v is null)
+            {
+                _ = psi.Environment.Remove(k);
+            }
+            else
+            {
+                psi.Environment[k] = v;
+            }
+        }
+        return psi;
+    }
+
+    private static void KillQuietly(Process p)
+    {
+        try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    private static async Task<bool> WaitForExitAsync(Process p, int timeoutMinutes)
+    {
+        bool timedOut = !p.WaitForExit(TimeSpan.FromMinutes(timeoutMinutes));
+        if (timedOut)
+        {
+            KillQuietly(p);
+            await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        return timedOut;
+    }
+
+    private static bool TryMeter(object gate, ref bool closed, StreamWriter stream, Func<string, bool> record, Func<string, bool> onLine, string data)
+    {
+        lock (gate) { if (closed) { return false; } if (record(data)) { stream.WriteLine(data); stream.Flush(); } }
+        return onLine(data);
+    }
+
+    private static void FailClosed(object gate, ref bool closed, string stderrPath, Exception ex)
+    {
+        lock (gate)
+        {
+            if (!closed)
+            {
+                File.AppendAllText(stderrPath + ".launcher", $"metering failed, worker stopped: {ex}{Environment.NewLine}");
+            }
+        }
     }
 
     /// <summary>
