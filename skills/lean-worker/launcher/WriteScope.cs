@@ -68,7 +68,7 @@ internal static class WriteScope
     {
         return [.. before.Dirty.Keys.Union(after.Dirty.Keys, StringComparer.Ordinal)
             .Where(p => !before.Dirty.TryGetValue(p, out string? a) || !after.Dirty.TryGetValue(p, out string? b) || a != b)
-            .Order(StringComparer.Ordinal)];
+            .Order(StringComparer.Ordinal),];
     }
 
     /// <summary>
@@ -139,7 +139,7 @@ internal static class WriteScope
             Task<string> output = p.StandardOutput.ReadToEndAsync();
             _ = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(60_000)) { try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } return null; }
-            return p.ExitCode == 0 ? await output.ConfigureAwait(false) : null;
+            return p.ExitCode is 0 ? await output.ConfigureAwait(false) : null;
         }
         catch (System.ComponentModel.Win32Exception) { return null; } // git is not installed
     }

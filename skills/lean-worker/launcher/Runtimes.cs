@@ -63,7 +63,7 @@ internal static class Runtimes
 
     public static string Quote(string s)
     {
-        if (s.Length == 0)
+        if (s.Length is 0)
         {
             return "\"\"";
         }

@@ -66,7 +66,7 @@ internal static class Quota
     // region only: "region": "cn" in the provider's quota block uses api.minimaxi.com.
     private static QuotaReading ReadMinimax(Provider p)
     {
-        string host = Json.Str(p.Quota, "region") == "cn" ? "https://api.minimaxi.com" : "https://api.minimax.io";
+        string host = Json.Str(p.Quota, "region") is "cn" ? "https://api.minimaxi.com" : "https://api.minimax.io";
         string url = Json.Str(p.Quota, "url") ?? $"{host}/v1/api/openplatform/coding_plan/remains";
         using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(10) };
         using HttpRequestMessage req = new(HttpMethod.Get, url);
@@ -98,13 +98,13 @@ internal static class Quota
         foreach (JsonObject m in (doc["model_remains"] as JsonArray ?? []).OfType<JsonObject>())
         {
             string model = Json.Str(m, "model_name") ?? "?";
-            string prefix = model == "general" ? string.Empty : model + "-";
+            string prefix = model is "general" ? string.Empty : model + "-";
             // The text models' interval is the plan's 5-hour block. Blocks are clock-aligned and cut at the UTC day
             // boundary, so one can be shorter (22:00-02:00 CEST was 4 h); it is still the "5h" window.
             // Other families are named by their block length (video: 24h).
             long hours = (long)Math.Round((Json.Num(m["end_time"]) - Json.Num(m["start_time"])) / 3_600_000.0, MidpointRounding.ToEven);
             string interval;
-            if (model == "general")
+            if (model is "general")
             {
                 interval = "5h";
             }
@@ -120,7 +120,7 @@ internal static class Quota
             windows.Add(Window($"{prefix}{interval}", m, "current_interval", "end_time"));
             windows.Add(Window($"{prefix}weekly", m, "current_weekly", "weekly_end_time"));
         }
-        if (windows.Count == 0)
+        if (windows.Count is 0)
         {
             throw new LaunchException("MiniMax quota: no model_remains in response");
         }
@@ -173,9 +173,9 @@ internal static class Quota
                 _ => string.Create(CultureInfo.InvariantCulture, $"u{unit}x{number}"),
             };
             string? type = Json.Str(l, "type");
-            string name = type == "TIME_LIMIT" ? $"mcp-{span}" : span;
+            string name = type is "TIME_LIMIT" ? $"mcp-{span}" : span;
             DateTimeOffset? reset = l["nextResetTime"] is JsonValue r && r.TryGetValue(out long ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime() : null;
-            string? detail = type == "TIME_LIMIT" ? string.Create(CultureInfo.InvariantCulture, $"{Json.Num(l["currentValue"])} of {Json.Num(l["usage"])} calls") : null;
+            string? detail = type is "TIME_LIMIT" ? string.Create(CultureInfo.InvariantCulture, $"{Json.Num(l["currentValue"])} of {Json.Num(l["usage"])} calls") : null;
             windows.Add(new QuotaWindow(name, Json.Dec(l, "percentage") ?? 0, reset, detail));
         }
         return new QuotaReading(provider, Json.Str(data, "level"), windows, DateTimeOffset.Now);

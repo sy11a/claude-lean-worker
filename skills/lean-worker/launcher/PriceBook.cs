@@ -24,13 +24,13 @@ internal sealed class PriceBook
                 continue;
             }
 
-            foreach (string? k in _keyRouting.Where(p.ContainsKey)) { _ = p.Remove(k); dropped.Add($"{name}.{k}"); }
+            foreach (string? k in _keyRouting.Where(k => p.ContainsKey(k))) { _ = p.Remove(k); dropped.Add($"{name}.{k}"); }
             if (p["quota"] is JsonObject q)
             {
-                foreach (string? k in _quotaRouting.Where(q.ContainsKey)) { _ = q.Remove(k); dropped.Add($"{name}.quota.{k}"); }
+                foreach (string? k in _quotaRouting.Where(k => q.ContainsKey(k))) { _ = q.Remove(k); dropped.Add($"{name}.quota.{k}"); }
             }
         }
-        return dropped.Count == 0 ? [] : [$"ignored in {file} (set them in {UserFile()}): {string.Join(", ", dropped)}"];
+        return dropped.Count is 0 ? [] : [$"ignored in {file} (set them in {UserFile()}): {string.Join(", ", dropped)}"];
     }
 
     private PriceBook(JsonObject doc) => _doc = doc;
@@ -76,7 +76,7 @@ internal sealed class PriceBook
             Json.MergeInto(book._doc, o);
             book.Sources.Add(Path.GetFullPath(f));
         }
-        if (book.Sources.Count == 0)
+        if (book.Sources.Count is 0)
         {
             throw new LaunchException($"no prices.json found (expected one next to the launcher: {files[0]})");
         }
@@ -97,14 +97,18 @@ internal sealed class PriceBook
 
     public Provider Provider(string name) => new(name, _doc["providers"]?[name] as JsonObject);
 
-    /// <summary>Splits "provider/model"; a bare model id belongs to anthropic.</summary>
+    /// <summary>
+    /// Splits "provider/model"; a bare model id belongs to anthropic.
+    /// </summary>
     public static (string Provider, string Model) Split(string id)
     {
         int slash = id.IndexOf('/', StringComparison.Ordinal);
         return slash > 0 ? (id[..slash], id[(slash + 1)..]) : ("anthropic", id);
     }
 
-    /// <summary>The price for a model id reported by the runtime, or null when no key matches.</summary>
+    /// <summary>
+    /// The price for a model id reported by the runtime, or null when no key matches.
+    /// </summary>
     public ModelPrice? Find(string provider, string model)
     {
         if (_doc["models"] is not JsonObject models)
@@ -148,7 +152,7 @@ internal sealed class PriceBook
         }
 
         string policy = UnknownModel;
-        if (policy == "error")
+        if (policy is "error")
         {
             throw new LaunchException($"no price for {provider}/{model}; add it to .lean-worker/prices.json");
         }

@@ -19,7 +19,7 @@ internal static class Json
 
     public static JsonObject? TryParseObject(string line)
     {
-        if (line.Length == 0 || line[0] != '{')
+        if (line.Length is 0 || line[0] is not '{')
         {
             return null;
         }
