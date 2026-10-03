@@ -127,24 +127,7 @@ internal static partial class Commands
         string label;
         if (f.GetValueOrDefault("--claude") is { } claude)
         {
-            string path = File.Exists(claude) ? claude : FindClaudeTranscript(claude);
-            string provider = f.GetValueOrDefault("--provider") ?? "anthropic";
-            ClaudeRuntime rt = new();
-            Dictionary<string, Usage> byId = new(StringComparer.Ordinal);
-            foreach (string line in File.ReadLines(path))
-            {
-                if (!line.Contains("\"usage\"", StringComparison.Ordinal) || Json.TryParseObject(line) is not { } obj)
-                {
-                    continue;
-                }
-
-                if (rt.Parse(obj, new Outcome()) is { } u)
-                {
-                    byId[u.Id] = u; // the last record of a message wins
-                }
-            }
-            calls = [.. byId.Values.Select(u => (provider, u))];
-            label = path;
+            (calls, label) = ClaudeCalls(claude, f.GetValueOrDefault("--provider") ?? "anthropic");
         }
         else if (f.GetValueOrDefault("--opencode") is { } session)
         {
@@ -193,6 +176,27 @@ internal static partial class Commands
         string projects = Path.Combine(dir, "projects");
         string? hit = Directory.Exists(projects) ? Directory.EnumerateFiles(projects, sessionId + ".jsonl", SearchOption.AllDirectories).FirstOrDefault() : null;
         return hit ?? throw new LaunchException($"no transcript {sessionId}.jsonl under {projects}");
+    }
+
+    private static (List<(string Provider, Usage Usage)> Calls, string Label) ClaudeCalls(string claude, string provider)
+    {
+        string path = File.Exists(claude) ? claude : FindClaudeTranscript(claude);
+        ClaudeRuntime rt = new();
+        Dictionary<string, Usage> byId = new(StringComparer.Ordinal);
+        foreach (string line in File.ReadLines(path))
+        {
+            if (!line.Contains("\"usage\"", StringComparison.Ordinal) || Json.TryParseObject(line) is not { } obj)
+            {
+                continue;
+            }
+
+            if (rt.Parse(obj, new Outcome()) is { } u)
+            {
+                byId[u.Id] = u; // the last record of a message wins
+            }
+        }
+
+        return ([.. byId.Values.Select(u => (provider, u))], path);
     }
 
     private static List<(string, Usage)> OpencodeCalls(string session)

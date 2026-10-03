@@ -94,43 +94,71 @@ internal sealed class Options
         for (int i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new LaunchException($"{args[i]} needs a value");
-            switch (args[i])
+            if (!o.TrySetText(args[i], () => Next()) && !o.TrySetParsed(args[i], () => Next()) && !o.TrySetFlag(args[i]))
             {
-                case "--task": { o.TaskFile = Next(); break; }
-                case "--continue-from": { o.ContinueFrom = Next(); break; }
-                case "--profile": { o.Profile = Next(); break; }
-                case "--system": { o.SystemFile = Next(); break; }
-                case "--name": { o.Name = Next(); break; }
-                case "--runtime": { o.Runtime = Next(); break; }
-                case "--model": { o.Model = Next(); break; }
-                case "--effort": { o.Effort = Next(); break; }
-                case "--variant": { o.Variant = Next(); break; }
-                case "--tools": { o.Tools = [.. Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]; break; }
-                case "--allow": { o.AllowedTools.Add(Next()); break; }
-                case "--write-scope": { o.WriteScope.Add(Next()); break; }
-                case "--mcp-config": { o.McpConfig = Next(); break; }
-                case "--max-budget-usd": { o.MaxBudgetUsd = decimal.Parse(Next(), CultureInfo.InvariantCulture); break; }
-                case "--wrap-up-at": { o.WrapUpAt = decimal.Parse(Next(), CultureInfo.InvariantCulture); break; }
-                case "--prices": { o.PricesFile = Next(); break; }
-                case "--permission-mode": { o.PermissionMode = Next(); break; }
-                case "--runs-root": { o.RunsRoot = Next(); break; }
-                case "--claude-settings": { o.ClaudeSettings = Next(); break; }
-                case "--timeout-minutes": { o.TimeoutMinutes = int.Parse(Next(), CultureInfo.InvariantCulture); break; }
-                case "--report-max-chars": { o.ReportMaxChars = int.Parse(Next(), CultureInfo.InvariantCulture); break; }
-                case "--no-project-notes": { o.NoProjectNotes = true; break; }
-                case "--replace-system-prompt": { o.ReplaceSystemPrompt = true; break; }
-                case "--no-bare": { o.Mode = "lean"; break; }
-                case "--mode": { o.Mode = Next(); break; }
-                case "--keep-claude-md": { o.KeepClaudeMd = true; break; }
-                case "--keep-memory": { o.KeepMemory = true; break; }
-                case "--keep-hooks": { o.KeepHooks = true; break; }
-                case "--no-user-env": { o.NoUserEnv = true; break; }
-                case "--cache-ttl": { o.CacheTtl = Next(); break; }
-                case "--no-hooks": break; // hooks are off by default; accepted for compatibility
-                case "-h" or "--help": { o.Help = true; break; }
-                default: throw new LaunchException($"unknown option '{args[i]}' (see --help)");
+                throw new LaunchException($"unknown option '{args[i]}' (see --help)");
             }
         }
+
         return o;
+    }
+
+    private bool TrySetText(string arg, Func<string> next)
+    {
+        switch (arg)
+        {
+            case "--task": { TaskFile = next(); return true; }
+            case "--continue-from": { ContinueFrom = next(); return true; }
+            case "--profile": { Profile = next(); return true; }
+            case "--system": { SystemFile = next(); return true; }
+            case "--name": { Name = next(); return true; }
+            case "--runtime": { Runtime = next(); return true; }
+            case "--model": { Model = next(); return true; }
+            case "--effort": { Effort = next(); return true; }
+            case "--variant": { Variant = next(); return true; }
+            case "--mcp-config": { McpConfig = next(); return true; }
+            case "--prices": { PricesFile = next(); return true; }
+            case "--permission-mode": { PermissionMode = next(); return true; }
+            case "--runs-root": { RunsRoot = next(); return true; }
+            case "--claude-settings": { ClaudeSettings = next(); return true; }
+            case "--mode": { Mode = next(); return true; }
+            case "--cache-ttl": { CacheTtl = next(); return true; }
+        }
+
+        return false;
+    }
+
+    private bool TrySetParsed(string arg, Func<string> next)
+    {
+        switch (arg)
+        {
+            case "--tools": { Tools = [.. next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]; return true; }
+            case "--allow": { AllowedTools.Add(next()); return true; }
+            case "--write-scope": { WriteScope.Add(next()); return true; }
+            case "--max-budget-usd": { MaxBudgetUsd = decimal.Parse(next(), CultureInfo.InvariantCulture); return true; }
+            case "--wrap-up-at": { WrapUpAt = decimal.Parse(next(), CultureInfo.InvariantCulture); return true; }
+            case "--timeout-minutes": { TimeoutMinutes = int.Parse(next(), CultureInfo.InvariantCulture); return true; }
+            case "--report-max-chars": { ReportMaxChars = int.Parse(next(), CultureInfo.InvariantCulture); return true; }
+        }
+
+        return false;
+    }
+
+    private bool TrySetFlag(string arg)
+    {
+        switch (arg)
+        {
+            case "--no-project-notes": { NoProjectNotes = true; return true; }
+            case "--replace-system-prompt": { ReplaceSystemPrompt = true; return true; }
+            case "--no-bare": { Mode = "lean"; return true; }
+            case "--keep-claude-md": { KeepClaudeMd = true; return true; }
+            case "--keep-memory": { KeepMemory = true; return true; }
+            case "--keep-hooks": { KeepHooks = true; return true; }
+            case "--no-user-env": { NoUserEnv = true; return true; }
+            case "--no-hooks": { return true; } // hooks are off by default; accepted for compatibility
+            case "-h" or "--help": { Help = true; return true; }
+        }
+
+        return false;
     }
 }
